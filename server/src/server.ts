@@ -62,6 +62,7 @@ const documents: TextDocuments<TextDocument> = new TextDocuments(TextDocument);
 let hasConfigurationCapability = false;
 let hasWorkspaceFolderCapability = false;
 let hasDiagnosticRelatedInformationCapability = false;
+let supportsFullBuffer = true;
 
 connection.onInitialize((params: InitializeParams) => {
 	const capabilities = params.capabilities;
@@ -129,6 +130,7 @@ const documentSettings: Map<string, Thenable<ExampleSettings>> = new Map();
 // Cache the settings of all open documents
 interface IDEState {
 	fstar_ide: cp.ChildProcess;
+	fstar_lax_ide: cp.ChildProcess;
 	last_query_id: number;
 }
 
@@ -168,8 +170,17 @@ function mkPosition(pos: number []) : Position {
 	return Position.create(pos[0] - 1, pos[1]);
 }
 
-function handleIdeProtocolInfo(textDocument: TextDocument, r : any) {
+interface ProtocolInfo {
+	version:number;
+	features:string [];
+}
+
+function handleIdeProtocolInfo(textDocument: TextDocument, pi : ProtocolInfo) {
 	console.log ("FStar ide returned protocol info");
+	if (!pi.features.includes("full-buffer")) {
+		supportsFullBuffer = false;
+		console.log("fstar.exe does not support full-buffer queries.");
+	}
 } 
 
 function handleIdeProgress(textDocument: TextDocument, contents : any) {
@@ -244,7 +255,13 @@ function handleFStarResponseForDocument(textDocument: TextDocument, data:string)
 	lines.forEach(line => { handleOneResponseForDocument(textDocument, line);  });
 }
 
-function sendRequestForDocument(textDocument : TextDocument, msg:any) {
+function handleLaxFStarResponseForDocument(textDocument: TextDocument, data:string) {
+	// // console.log("Got raw response: " +typeof(data) + " :: " +data);
+	// const lines = data.toString().split('\n');
+	// lines.forEach(line => { handleOneResponseForDocument(textDocument, line);  });
+}
+
+function sendRequestForDocument(textDocument : TextDocument, msg:any, lax: boolean) {
 	const doc_state = documentState.get(textDocument.uri);
 	if (!doc_state) {
 		return;
@@ -254,10 +271,19 @@ function sendRequestForDocument(textDocument : TextDocument, msg:any) {
 		doc_state.last_query_id = qid + 1;
 		msg["query-id"] = '' + (qid + 1);
 		const text = JSON.stringify(msg);
+		const proc = lax ? doc_state.fstar_lax_ide : doc_state.fstar_ide;
 		// console.log("Sending message: " +text);
-		doc_state?.fstar_ide?.stdin?.write(text);
-		doc_state?.fstar_ide?.stdin?.write("\n");
+		proc?.stdin?.write(text);
+		proc?.stdin?.write("\n");
 	}
+}
+
+function sendLaxRequestForDocument(textDocument : TextDocument, msg:any) {
+	sendRequestForDocument(textDocument, msg, true);
+}
+
+function sendFullRequestForDocument(textDocument : TextDocument, msg:any) {
+	sendRequestForDocument(textDocument, msg, false);
 }
 
 documents.onDidOpen( e => {
@@ -267,11 +293,16 @@ documents.onDidOpen( e => {
 	const filename = path.basename(filePath.fsPath);
 	console.log("onDidOpen(dir="+docDirectory+", file="+filename);
 	const fstar_ide = cp.spawn("fstar.exe", ["--ide", filename], {cwd:docDirectory});
-	documentState.set(textDocument.uri, { fstar_ide: fstar_ide, last_query_id: 0 });
+	const fstar_lax_ide = cp.spawn("fstar.exe", ["--lax", "--ide", filename], {cwd:docDirectory});
+	documentState.set(textDocument.uri, { fstar_ide: fstar_ide, fstar_lax_ide: fstar_lax_ide, last_query_id: 0 });
 	fstar_ide.stdin.setDefaultEncoding('utf-8');
 	fstar_ide.stdout.on('data', (data) => { handleFStarResponseForDocument(e.document, data); });
 	const vfs_add = {"query":"vfs-add","args":{"filename":null,"contents":textDocument.getText()}};
-	sendRequestForDocument(textDocument, vfs_add);
+	sendFullRequestForDocument(textDocument, vfs_add);
+
+	fstar_lax_ide.stdin.setDefaultEncoding('utf-8');
+	fstar_lax_ide.stdout.on('data', (data) => { handleLaxFStarResponseForDocument(e.document, data); });
+	sendLaxRequestForDocument(textDocument, vfs_add);
 });
 
 // Only keep settings for open documents
@@ -289,8 +320,10 @@ async function validateFStarDocument(textDocument: TextDocument): Promise<void> 
 	console.log("ValidateFStarDocument( " + textDocument.uri + ")");
 	connection.sendDiagnostics({uri:textDocument.uri, diagnostics:[]});
 	sendStatusClear({uri:textDocument.uri});
-	const push_context = { query:"full-buffer", args:{kind:"full", code:textDocument.getText(), line:0, column:0} };
-	sendRequestForDocument(textDocument, push_context);
+	if (supportsFullBuffer) {
+		const push_context = { query:"full-buffer", args:{kind:"full", code:textDocument.getText(), line:0, column:0} };
+		sendFullRequestForDocument(textDocument, push_context);
+	}
 }
 
 connection.onDidChangeWatchedFiles(_change => {
