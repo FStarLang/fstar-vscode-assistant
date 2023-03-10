@@ -15,6 +15,61 @@ import {
 
 let client: LanguageClient;
 
+
+// This is the check mark icon that will be displayed in the gutter
+const gutterIconOk = vscode.window.createTextEditorDecorationType({
+	gutterIconSize: 'contain',
+	gutterIconPath: path.join(__filename, '..', '..', '..', 'resources',  'icons', 'check.svg')
+});
+
+// A map from file URI to the gutter decorations positions for it
+const gutterOkDecorationsMap : Map<string, vscode.Range[]> = new Map<string, vscode.Range[]>();
+
+// Messags in the small protocol running on top of LSP between the server and client
+interface StatusOkMessage {
+	uri: string;
+	ranges: vscode.Range [];
+}
+
+interface StatusClearMessage {
+	uri: string;
+}
+
+function setActiveEditorDecorationsIfUriMatches(uri: string) {
+	const editor = vscode.window.activeTextEditor;
+	if (!editor) {	return; }
+	if (editor.document.uri.toString() === uri) {
+		const currentDecorations = gutterOkDecorationsMap.get(uri) ?? [];
+		editor.setDecorations(gutterIconOk, currentDecorations);
+	}
+}
+
+function handleStatusOk (msg : StatusOkMessage)  {
+	console.log("Received statusOk notification: " +msg);
+	const currentDecorations : vscode.Range [] = gutterOkDecorationsMap.get(msg.uri) ?? [];
+	msg.ranges.forEach (range => {
+		currentDecorations.push(range);
+	});
+	gutterOkDecorationsMap.set(msg.uri, currentDecorations);
+	setActiveEditorDecorationsIfUriMatches(msg.uri);
+}
+
+function handleStatusClear (msg: StatusClearMessage): void {
+	console.log("Received statusClear notification: " +msg);
+	const currentDecorations : vscode.Range [] = gutterOkDecorationsMap.get(msg.uri) ?? [];
+	currentDecorations.length = 0;
+	gutterOkDecorationsMap.set(msg.uri, currentDecorations);
+	setActiveEditorDecorationsIfUriMatches(msg.uri);
+}
+
+// A client-only handler for a active editor changed raised by the editor
+// We set the gutter decorations for the document in the new active editor
+function handleDidChangeActiveEditor(editor : vscode.TextEditor) {
+	console.log("Active editor changed to " + editor.document.uri.toString());
+	const currentDecorations = gutterOkDecorationsMap.get(editor.document.uri.toString()) ?? [];
+	editor.setDecorations(gutterIconOk, currentDecorations);
+}
+
 export function activate(context: ExtensionContext) {
 	// The server is implemented in node
 	const serverModule = context.asAbsolutePath(
@@ -43,74 +98,22 @@ export function activate(context: ExtensionContext) {
 
 	// Create the language client and start the client.
 	client = new LanguageClient(
-		'languageServerExample',
-		'Language Server Example',
+		'fstar-vscode-assistant',
+		'F* VSCode Assistant',
 		serverOptions,
 		clientOptions
 	);
-
-	// const serverOptions : ServerOptions = {
-	// 	run : {
-	// 		command: "fstar.exe",
-	// 		args: ["--lsp"]
-	// 	},
-	// 	debug : {
-	// 		command: "fstar.exe",
-	// 		args: ["--lsp"]
-	// 	}
-	// };
-
-	// // // Create the language client and start the client.
-	// client = new LanguageClient(
-	// 	'languageServerExample',
-	// 	'Language Server Example',
-	// 	serverOptions,
-	// 	{ documentSelector: [{ scheme: "file", language: "fstar" }] },
-	// 	true
-	// );
-	const gutterIconOk =vscode.window.createTextEditorDecorationType(
-		{
-			gutterIconSize: 'contain',
-			gutterIconPath: path.join(__filename, '..', '..', '..', 'resources',  'icons', 'check.svg')
-		});
 	
-	// const gutterIconDecorationOk : vscode.TextEditorDecorationType = {
-	// 	gutterIconSize: 'contain',
-	// 	gutterIconPath: path.join(__filename, '..', '..', '..', 'resources',  'icons', 'check.svg')
-	// };
-	let currentDecorations : vscode.Range [] = [];
-
 	client.onReady().then(() => {
-		client.onNotification('custom/statusOk', (args: Array<number>) => {
-			console.log("Received statusOk notification: " +args);
-			if (!vscode.window.activeTextEditor) {
-				console.log("No active text editor");
-			}
-			else {
-				console.log("Setting decoration");
-				const start_pos = new vscode.Position(args[0], args[1]);
-				const end_pos = new vscode.Position(args[2], args[3]);
-				currentDecorations.push(new vscode.Range(start_pos, end_pos));
-				vscode.window.activeTextEditor?.setDecorations(gutterIconOk, currentDecorations);
-			}
-		});
+		client.onNotification('custom/statusOk', handleStatusOk);
+		client.onNotification('custom/statusClear', handleStatusClear);
+	});
+	vscode.window.onDidChangeActiveTextEditor(handleDidChangeActiveEditor);
 
-		client.onNotification('custom/statusClear', (args:Array<string>) => {
-			currentDecorations = [];
-			vscode.window.activeTextEditor?.setDecorations(gutterIconOk, []);
-		});
-	});
-	vscode.window.onDidChangeActiveTextEditor((editor) => {
-		return;// do something with the new active editor
-	});
 	console.log("Activate called on " + context.asAbsolutePath("/"));
 	// Start the client. This will also launch the server
 	context.subscriptions.push(client.start());
 
-	// console.log("Activate called on " + context.asAbsolutePath("/"));
-	
-	// // Start the client. This will also launch the server
-	// client.start();
 }
 
 export function deactivate(): Thenable<void> | undefined {

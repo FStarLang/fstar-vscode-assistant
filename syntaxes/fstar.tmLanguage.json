@@ -16,7 +16,7 @@
 		"keywords": {
 			"patterns": [{
 				"name": "keyword.control.fstar",
-				"match": "\\b(module|open|let|in|match|with|if|then|else|val|fun|type|effect|new_effect|sub_effect|begin|end)\\b"
+				"match": "\\b(attributes|noeq|unopteq|and|assert|assume|begin|by|calc|class|default|decreases|effect|eliminate|else|end|ensures|exception|exists|false|friend|forall|fun|function|if|in|include|inline|inline_for_extraction|instance|introduce|irreducible|let|logic|match|returns|as|module|new|new_effect|layered_effect|polymonadic_bind|polymonadic_subcomp|noextract|of|open|opaque|private|quote|range_of|rec|reifiable|reify|reflectable|requires|set_range_of|sub_effect|synth|then|total|true|try|type|unfold|unfoldable|val|when|with)\\b"
 			}]
 		},
 		"strings": {
@@ -69,3 +69,4 @@
 	},
 	"scopeName": "source.fst"
 }
+

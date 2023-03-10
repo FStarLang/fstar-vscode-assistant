@@ -15,7 +15,8 @@ import {
 	TextDocumentPositionParams,
 	TextDocumentSyncKind,
 	InitializeResult,
-	Position
+	Position,
+	Range
 } from 'vscode-languageserver/node';
 
 import {
@@ -33,6 +34,27 @@ import path = require('path');
 // Create a connection for the server, using Node's IPC as a transport.
 // Also include all preview / proposed LSP features.
 const connection = createConnection(ProposedFeatures.all);
+
+// Messags in the small protocol running on top of LSP between the server and client
+interface StatusOkMessage {
+	uri: string;
+	ranges: Range [];
+}
+
+interface StatusClearMessage {
+	uri: string;
+}
+
+function sendStatusOk (msg : StatusOkMessage)  {
+	console.log("Sending statusOk notification: " +msg);
+	connection.sendNotification('custom/statusOk', msg);
+}
+
+
+function sendStatusClear (msg: StatusClearMessage) {
+	console.log("Sending statusClear notification: " +msg);
+	connection.sendNotification('custom/statusClear', msg);
+}
 
 // Create a simple text document manager.
 const documents: TextDocuments<TextDocument> = new TextDocuments(TextDocument);
@@ -103,39 +125,11 @@ let globalSettings: ExampleSettings = defaultSettings;
 // Cache the settings of all open documents
 const documentSettings: Map<string, Thenable<ExampleSettings>> = new Map();
 
-interface IDERequest {
-	query_id : number;
-}
-
-interface IDEResponse {
-	kind:     string;
-	query_id: number;
-	status:   string;
-	response: string;
-}
-
-enum IDEStateEnum {
-   Initializing,
-   Ready,
-   Dead
-}
-
-interface Pos {
-	line: number;
-	column: number
-}
-
-interface Range {
-	start_pos: Pos;
-	end_pos: Pos
-}
 
 // Cache the settings of all open documents
 interface IDEState {
 	fstar_ide: cp.ChildProcess;
-	last_seen_doc_contents: string;
 	last_query_id: number;
-	gutter_decorations: Range []
 }
 
 const documentState: Map<string, IDEState> = new Map();
@@ -169,52 +163,75 @@ function getDocumentSettings(resource: string): Thenable<ExampleSettings> {
 	return result;
 }
 
-function mkPosition(pos: number []) {
+function mkPosition(pos: number []) : Position {
 	//F* line numbers begin at 1; unskew
 	return Position.create(pos[0] - 1, pos[1]);
 }
 
+function handleIdeProtocolInfo(textDocument: TextDocument, r : any) {
+	console.log ("FStar ide returned protocol info");
+} 
+
+function handleIdeProgress(textDocument: TextDocument, contents : any) {
+	if (contents.stage == "full-buffer-fragment-ok" ) {
+		const rng = contents.ranges;
+		const ok_range = Range.create(mkPosition(rng.beg), mkPosition(rng.end));
+		const msg = {
+			uri: textDocument.uri,
+			ranges: [ok_range]
+		};
+		sendStatusOk(msg);
+	}
+}
+
+interface IdeError {
+	message: string;
+	ranges:  {beg: number []; end: number []} [];
+}
+
+function handleIdeFailure (textDocument : TextDocument, response : IdeError []) {
+	response.forEach((err) => {
+		const rng = err.ranges[0];
+		const diag = {
+			severity: DiagnosticSeverity.Error,
+			range: {
+				start: mkPosition(rng.beg),
+				end: mkPosition(rng.end)
+			},
+			message: err.message
+		};
+		connection.sendDiagnostics({uri:textDocument.uri, diagnostics:[diag]});				
+	}); 
+}
+
+function handleIdeSuccess (textDocument : TextDocument, response : any) {
+	return;
+}
+
 function handleOneResponseForDocument(textDocument: TextDocument, data:string) {
-	console.log("handleOneResponse: <" +data+ ">");
+	// console.log("handleOneResponse: <" +data+ ">");
 	if (data == "") { return; }
 	const r = JSON.parse(data);
 	if (r.kind == "protocol-info") {
-		console.log ("FStar ide returned protocol info " + r.kind);
+		return handleIdeProtocolInfo(textDocument, r);
 	}
 	else if (r.kind == "message" && r.level == "progress") {
-		const contents = r.contents;
-		if (contents.stage == "full-buffer-fragment-ok" ) {
-			const rng = contents.ranges;
-			const ok_range = [rng.beg[0] - 1, rng.beg[1], rng.end[0] - 1, rng.end[1]];
-			console.log("Setting ok_range: " + ok_range);
-			connection.sendNotification("custom/statusOk", ok_range);
-		}
+		return handleIdeProgress(textDocument, r.contents);
 	}
 	else if (r.kind == "response" && r.status == "failure") {
 		if (!r.response) { return; }
-		r.response.forEach((err : {message:string; ranges:[{beg:number[]; end:number[]}]}) => {
-			const rng = err.ranges[0];
-			const diag = {
-				severity: DiagnosticSeverity.Error,
-				range: {
-					start: mkPosition(rng.beg),
-					end: mkPosition(rng.end)
-				},
-				message: err.message
-			};
-			connection.sendDiagnostics({uri:textDocument.uri, diagnostics:[diag]});				
-		}); 
+		return handleIdeFailure(textDocument, r.response);
 	}
 	else if (r.kind == "response" && r.status == "success") { 
-		return;
+		return handleIdeSuccess(textDocument, r.response);
 	}
 	else {
-		console.log("Unhandled response");
+		console.log("Unhandled response: " + r.kind);
 	}
 }
 
 function handleFStarResponseForDocument(textDocument: TextDocument, data:string) {
-	console.log("Got raw response: " +typeof(data) + " :: " +data);
+	// console.log("Got raw response: " +typeof(data) + " :: " +data);
 	const lines = data.toString().split('\n');
 	lines.forEach(line => { handleOneResponseForDocument(textDocument, line);  });
 }
@@ -229,7 +246,7 @@ function sendRequestForDocument(textDocument : TextDocument, msg:any) {
 		doc_state.last_query_id = qid + 1;
 		msg["query-id"] = '' + (qid + 1);
 		const text = JSON.stringify(msg);
-		console.log("Sending message: " +text);
+		// console.log("Sending message: " +text);
 		doc_state?.fstar_ide?.stdin?.write(text);
 		doc_state?.fstar_ide?.stdin?.write("\n");
 	}
@@ -240,14 +257,13 @@ documents.onDidOpen( e => {
     const filePath = URI.parse(textDocument.uri);
 	const docDirectory = path.dirname(filePath.fsPath);
 	const filename = path.basename(filePath.fsPath);
-	console.log("onDidOpen(dir="+docDirectory+", file="+filename+"\n contents={"+textDocument.getText()+"}");
+	console.log("onDidOpen(dir="+docDirectory+", file="+filename);
 	const fstar_ide = cp.spawn("fstar.exe", ["--ide", filename], {cwd:docDirectory});
-	documentState.set(textDocument.uri, { fstar_ide: fstar_ide, last_seen_doc_contents: textDocument.getText(), last_query_id: 0, gutter_decorations:[] });
+	documentState.set(textDocument.uri, { fstar_ide: fstar_ide, last_query_id: 0 });
 	fstar_ide.stdin.setDefaultEncoding('utf-8');
 	fstar_ide.stdout.on('data', (data) => { handleFStarResponseForDocument(e.document, data); });
 	const vfs_add = {"query":"vfs-add","args":{"filename":null,"contents":textDocument.getText()}};
 	sendRequestForDocument(textDocument, vfs_add);
-	console.log("Finished onDidOpen");
 });
 
 // Only keep settings for open documents
@@ -264,8 +280,7 @@ documents.onDidChangeContent(change => {
 async function validateFStarDocument(textDocument: TextDocument): Promise<void> {
 	console.log("ValidateFStarDocument( " + textDocument.uri + ")");
 	connection.sendDiagnostics({uri:textDocument.uri, diagnostics:[]});
-    connection.sendNotification("custom/statusClear", []);
-	// const push_context = { query:"push", args:{kind:"full", code:textDocument.getText(), line:0, column:0} };
+	sendStatusClear({uri:textDocument.uri});
 	const push_context = { query:"full-buffer", args:{kind:"full", code:textDocument.getText(), line:0, column:0} };
 	sendRequestForDocument(textDocument, push_context);
 }
