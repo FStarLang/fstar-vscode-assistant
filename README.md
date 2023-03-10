@@ -16,6 +16,8 @@ https://github.com/artagnon/vsfstar
 - Run `npm install` in this folder. This installs all necessary npm
   modules in both the client and server folder
 
+- Make sure to have a working fstar.exe in your path
+
 - Open VS Code on this folder.
 
 - Press Ctrl+Shift+B to start compiling the client and server in
