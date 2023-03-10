@@ -1,3 +1,5 @@
+# STILL VERY MUCH A WORK IN PROGRESS: NOT INTENDED FOR USE YET!
+
 # F* VS Code Assistant
 
 This VS Code extension provides support for interactively editing and
