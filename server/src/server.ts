@@ -186,26 +186,33 @@ function handleIdeProgress(textDocument: TextDocument, contents : any) {
 
 interface IdeError {
 	message: string;
-	ranges:  {beg: number []; end: number []} [];
+	level : string;
+	ranges:  {fname:string; beg: number []; end: number []} [];
 }
 
-function handleIdeFailure (textDocument : TextDocument, response : IdeError []) {
+function ideErrorLevelAsDiagnosticSeverity (level: string) : DiagnosticSeverity {
+	switch (level) {
+		case "warning": return DiagnosticSeverity.Warning;
+		case "error": return DiagnosticSeverity.Error;
+		case "info": return DiagnosticSeverity.Information;
+		default: return DiagnosticSeverity.Error;
+	}
+}
+
+function handleIdeDiagnostics (textDocument : TextDocument, response : IdeError []) {
 	response.forEach((err) => {
-		const rng = err.ranges[0];
-		const diag = {
-			severity: DiagnosticSeverity.Error,
-			range: {
-				start: mkPosition(rng.beg),
-				end: mkPosition(rng.end)
-			},
-			message: err.message
-		};
-		connection.sendDiagnostics({uri:textDocument.uri, diagnostics:[diag]});				
+		err.ranges.forEach ((rng) => {
+			const diag = {
+				severity: ideErrorLevelAsDiagnosticSeverity(err.level),
+				range: {
+					start: mkPosition(rng.beg),
+					end: mkPosition(rng.end)
+				},
+				message: err.message
+			};
+			connection.sendDiagnostics({uri:textDocument.uri, diagnostics:[diag]});
+		});
 	}); 
-}
-
-function handleIdeSuccess (textDocument : TextDocument, response : any) {
-	return;
 }
 
 function handleOneResponseForDocument(textDocument: TextDocument, data:string) {
@@ -220,10 +227,11 @@ function handleOneResponseForDocument(textDocument: TextDocument, data:string) {
 	}
 	else if (r.kind == "response" && r.status == "failure") {
 		if (!r.response) { return; }
-		return handleIdeFailure(textDocument, r.response);
+		return handleIdeDiagnostics(textDocument, r.response);
 	}
 	else if (r.kind == "response" && r.status == "success") { 
-		return handleIdeSuccess(textDocument, r.response);
+		if (!r.response) { return; }
+		return handleIdeDiagnostics(textDocument, r.response);
 	}
 	else {
 		console.log("Unhandled response: " + r.kind);
