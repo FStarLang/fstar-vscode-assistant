@@ -130,10 +130,28 @@ const documentSettings: Map<string, Thenable<ExampleSettings>> = new Map();
 
 
 // Cache the settings of all open documents
+interface FStarRange {
+	fname:string;
+	beg: number [];
+	end: number []
+}
+
+interface IdeSymbol {
+	kind:'symbol';
+	name:string;
+	type:string;
+	documentation:string;
+	definition:string;
+	"defined-at": any;
+	"symbol-range":FStarRange;
+	symbol:string;
+}
+
 interface IDEState {
 	fstar_ide: cp.ChildProcess;
 	fstar_lax_ide: cp.ChildProcess;
 	last_query_id: number;
+	hover_info: Map<string, IdeSymbol>;
 }
 
 const documentState: Map<string, IDEState> = new Map();
@@ -169,7 +187,7 @@ function getDocumentSettings(resource: string): Thenable<ExampleSettings> {
 
 function mkPosition(pos: number []) : Position {
 	//F* line numbers begin at 1; unskew
-	return Position.create(pos[0] - 1, pos[1]);
+	return Position.create(pos[0] > 0 ? pos[0] - 1 : pos[0], pos[1]);
 }
 
 interface ProtocolInfo {
@@ -200,7 +218,7 @@ function handleIdeProgress(textDocument: TextDocument, contents : any) {
 interface IdeError {
 	message: string;
 	level : string;
-	ranges:  {fname:string; beg: number []; end: number []} [];
+	ranges: FStarRange[];
 }
 
 function ideErrorLevelAsDiagnosticSeverity (level: string) : DiagnosticSeverity {
@@ -212,7 +230,29 @@ function ideErrorLevelAsDiagnosticSeverity (level: string) : DiagnosticSeverity 
 	}
 }
 
+function rangeOfFStarRange (rng: FStarRange) : Range {
+	return Range.create(mkPosition(rng.beg), mkPosition(rng.end));
+}
+
+function rangeAsFStarRange (rng: Range) : FStarRange {
+	return {
+		fname: "",
+		beg: [rng.start.line + 1, rng.start.character],
+		end: [rng.end.line + 1, rng.end.character]
+	};
+}
+
+function handleIdeSymbol(textDocument: TextDocument, response : IdeSymbol) {
+	console.log("Got ide symbol " +JSON.stringify(response));
+	const rng = JSON.stringify(response["symbol-range"]);
+	const hoverMap = documentState.get(textDocument.uri)?.hover_info;
+	if (hoverMap) {
+		hoverMap.set(rng, response);
+	}
+}
+
 function handleIdeDiagnostics (textDocument : TextDocument, response : IdeError []) {
+	if (!response || !(Array.isArray(response))) { return; }
 	response.forEach((err) => {
 		err.ranges.forEach ((rng) => {
 			const diag = {
@@ -229,13 +269,14 @@ function handleIdeDiagnostics (textDocument : TextDocument, response : IdeError 
 }
 
 function handleOneResponseForDocument(textDocument: TextDocument, data:string) {
-	// console.log("handleOneResponse: <" +data+ ">");
+	console.log("handleOneResponse: <" +data+ ">");
 	if (data == "") { return; }
 	const r = JSON.parse(data);
 	if (r.kind == "protocol-info") {
 		return handleIdeProtocolInfo(textDocument, r);
 	}
 	else if (r.kind == "message" && r.level == "progress") {
+		console.log("Got progress message: " +data);
 		return handleIdeProgress(textDocument, r.contents);
 	}
 	else if (r.kind == "response" && r.status == "failure") {
@@ -273,6 +314,9 @@ function handleOneLaxResponseForDocument(textDocument: TextDocument, data:string
 	}
 	else if (r.kind == "response" && r.status == "success") { 
 		if (!r.response) { return; }
+		if (r.response.kind == "symbol") {
+			return handleIdeSymbol(textDocument, r.response);
+		}
 		return handleIdeDiagnostics(textDocument, r.response);
 	}
 	else {
@@ -318,11 +362,17 @@ documents.onDidOpen( e => {
 	console.log("onDidOpen(dir="+docDirectory+", file="+filename);
 	const fstar_ide = cp.spawn("fstar.exe", ["--ide", filename], {cwd:docDirectory});
 	const fstar_lax_ide = cp.spawn("fstar.exe", ["--lax", "--ide", filename], {cwd:docDirectory});
-	documentState.set(textDocument.uri, { fstar_ide: fstar_ide, fstar_lax_ide: fstar_lax_ide, last_query_id: 0 });
+	documentState.set(textDocument.uri, { 
+						fstar_ide: fstar_ide,
+						fstar_lax_ide: fstar_lax_ide,
+						last_query_id: 0,
+						hover_info: new Map()
+					});
 	fstar_ide.stdin.setDefaultEncoding('utf-8');
 	fstar_ide.stdout.on('data', (data) => { handleFStarResponseForDocument(e.document, data); });
 	const vfs_add = {"query":"vfs-add","args":{"filename":null,"contents":textDocument.getText()}};
 	sendFullRequestForDocument(textDocument, vfs_add);
+	validateFStarDocument(textDocument, "full");
 
 	fstar_lax_ide.stdin.setDefaultEncoding('utf-8');
 	fstar_lax_ide.stdout.on('data', (data) => { handleLaxFStarResponseForDocument(e.document, data); });
@@ -338,18 +388,19 @@ documents.onDidClose(e => {
 // when the text document first opened or when its content has changed.
 documents.onDidChangeContent(change => {
 	laxValidateFStarDocument(change.document);
+	validateFStarDocument(change.document, "cache");
 });
 
 documents.onDidSave(change => {
-	validateFStarDocument(change.document);
+	validateFStarDocument(change.document, "full");
 });
 
-async function validateFStarDocument(textDocument: TextDocument): Promise<void> {
+async function validateFStarDocument(textDocument: TextDocument, kind:'full'|'cache'): Promise<void> {
 	console.log("ValidateFStarDocument( " + textDocument.uri + ")");
 	connection.sendDiagnostics({uri:textDocument.uri, diagnostics:[]});
 	sendStatusClear({uri:textDocument.uri});
 	if (supportsFullBuffer) {
-		const push_context = { query:"full-buffer", args:{kind:"full", code:textDocument.getText(), line:0, column:0} };
+		const push_context = { query:"full-buffer", args:{kind:kind, code:textDocument.getText(), line:0, column:0} };
 		sendFullRequestForDocument(textDocument, push_context);
 	}
 }
@@ -357,7 +408,7 @@ async function validateFStarDocument(textDocument: TextDocument): Promise<void> 
 async function laxValidateFStarDocument(textDocument: TextDocument): Promise<void> {
 	console.log("LaxValidateFStarDocument( " + textDocument.uri + ")");
 	connection.sendDiagnostics({uri:textDocument.uri, diagnostics:[]});
-	sendStatusClear({uri:textDocument.uri});
+	// sendStatusClear({uri:textDocument.uri});
 	if (supportsFullBuffer) {
 		const push_context = { query:"full-buffer", args:{kind:"full", code:textDocument.getText(), line:0, column:0} };
 		sendLaxRequestForDocument(textDocument, push_context);
@@ -384,7 +435,8 @@ connection.onCompletionResolve(
 	}
 );
 
-function findWordAtPosition(textDocument: TextDocument, position: Position) {
+function findWordAtPosition(textDocument: TextDocument, position: Position)
+ {
 	const text = textDocument.getText();
 	const offset = textDocument.offsetAt(position);
 	let start = text.lastIndexOf(' ', offset) + 1;
@@ -395,7 +447,9 @@ function findWordAtPosition(textDocument: TextDocument, position: Position) {
 		}
 	}
 	const end = text.substring(offset).search(/\W/) + offset;
-	return text.substring(start, end > start ? end : undefined);
+	const word = text.substring(start, end > start ? end : undefined);
+	const range = Range.create(textDocument.positionAt(start), textDocument.positionAt(end));
+	return {word: word, range: range};
 }
 
 connection.onHover(
@@ -405,20 +459,34 @@ connection.onHover(
 					" in " + textDocumentPosition.textDocument.uri);
 		const textDoc = documents.get(textDocumentPosition.textDocument.uri);
 		if (!textDoc) { return {contents: ""}; }
-		const text = findWordAtPosition(textDoc, textDocumentPosition.position);
-		// const query = {
-		// 	query:"lookup",
-		// 	args: {
-		// 		context:"code",
-		// 		symbol:text,
-		// 		"requested-info":["type","documentation"],
-		// 		location:{
-		// 			filename:"c:/cygwin64/home/nswamy/workspace/extensions/Demo.fst",
-		// 			line:16,
-		// 			column:27
-		// 		}}
-		// };
-		return {contents: {kind:'plaintext', value:"Hover at: " + text}};
+		const hoverInfo = findWordAtPosition(textDoc, textDocumentPosition.position);
+		const uri = textDocumentPosition.textDocument.uri;
+		const doc_state = documentState.get(uri);
+		const range = rangeAsFStarRange(hoverInfo.range);
+		if (!doc_state) { return {contents: ""}; }
+		const rangeKey = JSON.stringify(range);
+		console.log("Looking for hover info at " + rangeKey);
+		const result = doc_state.hover_info.get(rangeKey);
+		if (result) { //} && result.symbol == hoverInfo.word) { 
+			return {contents: {kind:'plaintext', value:result.name + "\n" + result.type}};
+		}
+		const filePath = URI.parse(uri).fsPath;
+		const query = {
+			query:"lookup",
+			args: {
+				context:"code",
+				symbol:hoverInfo.word,
+				"requested-info":["type","documentation"],
+				location:{
+					filename:filePath,
+					line:textDocumentPosition.position.line+1,
+					column:textDocumentPosition.position.character
+				},
+				"symbol-range" : range
+			}
+		};
+		sendLaxRequestForDocument(textDoc, query);
+		return {contents: {kind:'plaintext', value:"Loading hover at: " + hoverInfo.word}};
 	}
 );
 
