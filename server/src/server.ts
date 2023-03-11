@@ -16,7 +16,8 @@ import {
 	TextDocumentSyncKind,
 	InitializeResult,
 	Position,
-	Range
+	Range,
+	Hover
 } from 'vscode-languageserver/node';
 
 import {
@@ -30,6 +31,7 @@ import {
 import * as cp from 'child_process';
 
 import path = require('path');
+//import { HoverOptions } from 'vscode-languageclient';
 
 // Create a connection for the server, using Node's IPC as a transport.
 // Also include all preview / proposed LSP features.
@@ -80,14 +82,14 @@ connection.onInitialize((params: InitializeParams) => {
 		capabilities.textDocument.publishDiagnostics &&
 		capabilities.textDocument.publishDiagnostics.relatedInformation
 	);
-
 	const result: InitializeResult = {
 		capabilities: {
 			textDocumentSync: TextDocumentSyncKind.Incremental,
 			// Tell the client that this server supports code completion.
 			completionProvider: {
 				resolveProvider: true
-			}
+			},
+			hoverProvider: true
 		}
 	};
 	if (hasWorkspaceFolderCapability) {
@@ -255,10 +257,32 @@ function handleFStarResponseForDocument(textDocument: TextDocument, data:string)
 	lines.forEach(line => { handleOneResponseForDocument(textDocument, line);  });
 }
 
+function handleOneLaxResponseForDocument(textDocument: TextDocument, data:string) {
+	// console.log("handleOneResponse: <" +data+ ">");
+	if (data == "") { return; }
+	const r = JSON.parse(data);
+	if (r.kind == "protocol-info") {
+		return handleIdeProtocolInfo(textDocument, r);
+	}
+	else if (r.kind == "message" && r.level == "progress") {
+		return;
+	}
+	else if (r.kind == "response" && r.status == "failure") {
+		if (!r.response) { return; }
+		return handleIdeDiagnostics(textDocument, r.response);
+	}
+	else if (r.kind == "response" && r.status == "success") { 
+		if (!r.response) { return; }
+		return handleIdeDiagnostics(textDocument, r.response);
+	}
+	else {
+		console.log("Unhandled response: " + r.kind);
+	}
+}
 function handleLaxFStarResponseForDocument(textDocument: TextDocument, data:string) {
 	// // console.log("Got raw response: " +typeof(data) + " :: " +data);
-	// const lines = data.toString().split('\n');
-	// lines.forEach(line => { handleOneResponseForDocument(textDocument, line);  });
+	const lines = data.toString().split('\n');
+	lines.forEach(line => { handleOneLaxResponseForDocument(textDocument, line);  });
 }
 
 function sendRequestForDocument(textDocument : TextDocument, msg:any, lax: boolean) {
@@ -313,6 +337,10 @@ documents.onDidClose(e => {
 // The content of a text document has changed. This event is emitted
 // when the text document first opened or when its content has changed.
 documents.onDidChangeContent(change => {
+	laxValidateFStarDocument(change.document);
+});
+
+documents.onDidSave(change => {
 	validateFStarDocument(change.document);
 });
 
@@ -323,6 +351,16 @@ async function validateFStarDocument(textDocument: TextDocument): Promise<void> 
 	if (supportsFullBuffer) {
 		const push_context = { query:"full-buffer", args:{kind:"full", code:textDocument.getText(), line:0, column:0} };
 		sendFullRequestForDocument(textDocument, push_context);
+	}
+}
+
+async function laxValidateFStarDocument(textDocument: TextDocument): Promise<void> {
+	console.log("LaxValidateFStarDocument( " + textDocument.uri + ")");
+	connection.sendDiagnostics({uri:textDocument.uri, diagnostics:[]});
+	sendStatusClear({uri:textDocument.uri});
+	if (supportsFullBuffer) {
+		const push_context = { query:"full-buffer", args:{kind:"full", code:textDocument.getText(), line:0, column:0} };
+		sendLaxRequestForDocument(textDocument, push_context);
 	}
 }
 
@@ -343,6 +381,44 @@ connection.onCompletion(
 connection.onCompletionResolve(
 	(item: CompletionItem): CompletionItem => {
 		return item;
+	}
+);
+
+function findWordAtPosition(textDocument: TextDocument, position: Position) {
+	const text = textDocument.getText();
+	const offset = textDocument.offsetAt(position);
+	let start = text.lastIndexOf(' ', offset) + 1;
+	for (let i = offset; i >= start; i--) {
+		if (text.at(i)?.search(/\W/) === 0) {
+			start = i + 1;
+			break;
+		}
+	}
+	const end = text.substring(offset).search(/\W/) + offset;
+	return text.substring(start, end > start ? end : undefined);
+}
+
+connection.onHover(
+	(textDocumentPosition: TextDocumentPositionParams): Hover => {
+		console.log("Hover: " + textDocumentPosition.position.line + 
+					", " + textDocumentPosition.position.character+ 
+					" in " + textDocumentPosition.textDocument.uri);
+		const textDoc = documents.get(textDocumentPosition.textDocument.uri);
+		if (!textDoc) { return {contents: ""}; }
+		const text = findWordAtPosition(textDoc, textDocumentPosition.position);
+		// const query = {
+		// 	query:"lookup",
+		// 	args: {
+		// 		context:"code",
+		// 		symbol:text,
+		// 		"requested-info":["type","documentation"],
+		// 		location:{
+		// 			filename:"c:/cygwin64/home/nswamy/workspace/extensions/Demo.fst",
+		// 			line:16,
+		// 			column:27
+		// 		}}
+		// };
+		return {contents: {kind:'plaintext', value:"Hover at: " + text}};
 	}
 );
 
