@@ -17,7 +17,8 @@ import {
 	InitializeResult,
 	Position,
 	Range,
-	Hover
+	Hover,
+	WorkspaceFolder
 } from 'vscode-languageserver/node';
 
 import {
@@ -31,7 +32,31 @@ import {
 import * as cp from 'child_process';
 
 import path = require('path');
-//import { HoverOptions } from 'vscode-languageclient';
+
+// Import fs and path modules}
+import * as fs from 'fs';
+
+// Define a function that takes a directory path and a file path
+function checkFileInDirectory(dirPath : string, filePath :string) : boolean {
+	// Check if dirPath is a directory using fs.stat()
+	const stats = fs.statSync(dirPath);
+	if (!stats || !stats.isDirectory()) {
+		console.log(dirPath + ' is not a directory');
+		return false;
+	}
+
+	// Get the relative path from dirPath to filePath using path.relative()
+	const relativePath = path.relative(dirPath, filePath);
+	console.log("Relative path of " + filePath + " from " + dirPath + " is " + relativePath);
+	// Check if relativePath starts with '..' or '.'
+	if (relativePath.startsWith('..')) {
+		// If yes, then filePath is outside dirPath
+		return false;
+	} else {
+		// If yes, then filePath is inside dirPath	
+		return true;
+	} 
+}
 
 // Create a connection for the server, using Node's IPC as a transport.
 // Also include all preview / proposed LSP features.
@@ -60,14 +85,59 @@ function sendStatusClear (msg: StatusClearMessage) {
 
 // Create a simple text document manager.
 const documents: TextDocuments<TextDocument> = new TextDocuments(TextDocument);
+let workspaceFolders : WorkspaceFolder [] = [];
+const workspaceConfigs: Map<string, FStarConfig []> = new Map();
 
 let hasConfigurationCapability = false;
 let hasWorkspaceFolderCapability = false;
 let hasDiagnosticRelatedInformationCapability = false;
 let supportsFullBuffer = true;
 
+
+// Define a function that takes a folder path and an extension
+function findFilesByExtension(folderPath:string, extension:string) {
+	// Read the folder contents using fs.readdir()
+	const matches : string[] = [];
+	const files = fs.readdirSync(folderPath);
+	if (!files) {
+		console.error("No files found in " + folderPath);
+		return [];
+	}
+	// Loop over the files
+	for (const file of files) {
+		console.log("Checking file " + file + " for extension " + extension);
+		if (file.endsWith(extension)) {
+			console.log("Found config file " + file);
+			// absolute path of file is folderPath + file
+			matches.push(path.join(folderPath, file));
+		}
+	}
+	return matches;
+}
+	
 connection.onInitialize((params: InitializeParams) => {
+	console.log("onInitialize!");
 	const capabilities = params.capabilities;
+	if (params.workspaceFolders) {
+		params.workspaceFolders?.forEach(folder => {
+			const folderPath = URI.parse(folder.uri).fsPath;
+			const folderConfigs : FStarConfig[] = [];
+			console.log("Searchig in " +folderPath + " for .fst.config.json");
+			findFilesByExtension(folderPath, ".fst.config.json").forEach(configFile => {
+				console.log("Found config file " + configFile);
+				const contents = fs.readFileSync(configFile, 'utf8');
+				console.log("File cotents: " + contents + "");
+				const config = JSON.parse(contents);
+				if (!config.cwd) {
+					config.cwd = folderPath;
+				}
+				folderConfigs.push(config);
+			});
+			console.log("Settig workspaceConfigs for " +folderPath + " to " + JSON.stringify(folderConfigs));
+			workspaceConfigs.set(folderPath, folderConfigs);			
+		});
+		workspaceFolders = params.workspaceFolders;
+	}
 
 	// Does the client support the `workspace/configuration` request?
 	// If not, we fall back using global settings.
@@ -152,6 +222,13 @@ interface IDEState {
 	fstar_lax_ide: cp.ChildProcess;
 	last_query_id: number;
 	hover_info: Map<string, IdeSymbol>;
+}
+
+interface FStarConfig {
+	include_dirs:string [];
+	options:string [];
+	fstar_exe:string;
+	cwd: string;
 }
 
 const documentState: Map<string, IDEState> = new Map();
@@ -354,14 +431,50 @@ function sendFullRequestForDocument(textDocument : TextDocument, msg:any) {
 	sendRequestForDocument(textDocument, msg, false);
 }
 
+function findConfigFile(e : TextDocument) : FStarConfig {
+	const filePath = URI.parse(e.uri).fsPath;
+	let result : FStarConfig = {
+		options : [],
+		include_dirs : [],
+		fstar_exe : "fstar.exe",
+		cwd: path.dirname(filePath)
+	};
+	workspaceFolders.find((folder) => {
+		const folderPath = URI.parse(folder.uri).fsPath;
+		console.log("Checking folder: " +folderPath+  " for file: " +filePath);
+		if (checkFileInDirectory(folderPath, filePath)) {
+			const r = workspaceConfigs.get(folderPath);	
+			if (r) {
+				result = r[0];
+			}
+			console.log("Found config: " +JSON.stringify(result));
+		}
+	});
+	return result;
+}
+
 documents.onDidOpen( e => {
 	const textDocument = e.document;
-    const filePath = URI.parse(textDocument.uri);
+	const fstarConfig = findConfigFile(e.document);
+	const filePath = URI.parse(textDocument.uri);
 	const docDirectory = path.dirname(filePath.fsPath);
 	const filename = path.basename(filePath.fsPath);
 	console.log("onDidOpen(dir="+docDirectory+", file="+filename);
-	const fstar_ide = cp.spawn("fstar.exe", ["--ide", filename], {cwd:docDirectory});
-	const fstar_lax_ide = cp.spawn("fstar.exe", ["--lax", "--ide", filename], {cwd:docDirectory});
+	const options = ["--ide", filename];
+	fstarConfig.options.forEach((opt) => { options.push(opt); });
+	fstarConfig.include_dirs.forEach((dir) => { options.push("--include"); options.push(dir); });
+	console.log("Spawning fstar with options: " +options);
+	const fstar_ide =
+		cp.spawn(
+			fstarConfig.fstar_exe,
+			options,
+			{cwd:fstarConfig.cwd});
+	options.push("--lax");
+	const fstar_lax_ide =
+		cp.spawn(
+			fstarConfig.fstar_exe,
+			options,
+			{cwd:fstarConfig.cwd});
 	documentState.set(textDocument.uri, { 
 						fstar_ide: fstar_ide,
 						fstar_lax_ide: fstar_lax_ide,
@@ -370,12 +483,14 @@ documents.onDidOpen( e => {
 					});
 	fstar_ide.stdin.setDefaultEncoding('utf-8');
 	fstar_ide.stdout.on('data', (data) => { handleFStarResponseForDocument(e.document, data); });
+	fstar_ide.stderr.on('data', (data) => { console.log("fstar stderr: " +data); });
 	const vfs_add = {"query":"vfs-add","args":{"filename":null,"contents":textDocument.getText()}};
 	sendFullRequestForDocument(textDocument, vfs_add);
 	validateFStarDocument(textDocument, "full");
 
 	fstar_lax_ide.stdin.setDefaultEncoding('utf-8');
 	fstar_lax_ide.stdout.on('data', (data) => { handleLaxFStarResponseForDocument(e.document, data); });
+	fstar_lax_ide.stderr.on('data', (data) => { console.log("fstar lax stderr: " +data); });
 	sendLaxRequestForDocument(textDocument, vfs_add);
 });
 
