@@ -18,7 +18,10 @@ import {
 	Position,
 	Range,
 	Hover,
-	WorkspaceFolder
+	Definition,
+	DefinitionParams,
+	WorkspaceFolder,
+	LocationLink
 } from 'vscode-languageserver/node';
 
 import {
@@ -35,6 +38,7 @@ import path = require('path');
 
 // Import fs and path modules}
 import * as fs from 'fs';
+import { pathToFileURL } from 'url';
 
 // Define a function that takes a directory path and a file path
 function checkFileInDirectory(dirPath : string, filePath :string) : boolean {
@@ -159,7 +163,8 @@ connection.onInitialize((params: InitializeParams) => {
 			completionProvider: {
 				resolveProvider: true
 			},
-			hoverProvider: true
+			hoverProvider: true,
+			definitionProvider: true
 		}
 	};
 	if (hasWorkspaceFolderCapability) {
@@ -212,7 +217,7 @@ interface IdeSymbol {
 	type:string;
 	documentation:string;
 	definition:string;
-	"defined-at": any;
+	"defined-at": FStarRange;
 	"symbol-range":FStarRange;
 	symbol:string;
 }
@@ -550,7 +555,12 @@ connection.onCompletionResolve(
 	}
 );
 
-function findWordAtPosition(textDocument: TextDocument, position: Position)
+interface WordAndRange {
+	word: string;
+	range: FStarRange;
+}
+
+function findWordAtPosition(textDocument: TextDocument, position: Position) : WordAndRange
  {
 	const text = textDocument.getText();
 	const offset = textDocument.offsetAt(position);
@@ -564,7 +574,39 @@ function findWordAtPosition(textDocument: TextDocument, position: Position)
 	const end = text.substring(offset).search(/\W/) + offset;
 	const word = text.substring(start, end > start ? end : undefined);
 	const range = Range.create(textDocument.positionAt(start), textDocument.positionAt(end));
-	return {word: word, range: range};
+	return {word: word, range: rangeAsFStarRange(range)};
+}
+
+function findIdeSymbolAtPosition(textDocument: TextDocument, position: Position) {
+	const uri = textDocument.uri;
+	const doc_state = documentState.get(uri);
+	if (!doc_state) { return; }
+	const wordAndRange = findWordAtPosition(textDocument, position);
+	const range = wordAndRange.range;
+	const rangeKey = JSON.stringify(range);
+	console.log("Looking for symbol info at " + rangeKey);
+	const result = doc_state.hover_info.get(rangeKey);
+	return { symbolInfo: result, wordAndRange: wordAndRange };
+}
+
+function requestSymbolInfo(textDocument: TextDocument, position: Position, wordAndRange : WordAndRange) : void {
+	const uri = textDocument.uri;
+	const filePath = URI.parse(uri).fsPath;
+	const query = {
+		query:"lookup",
+		args: {
+			context:"code",
+			symbol:wordAndRange.word,
+			"requested-info":["type","documentation","defined-at"],
+			location:{
+				filename:filePath,
+				line:position.line+1,
+				column:position.character
+			},
+			"symbol-range" : wordAndRange.range
+		}
+	};
+	sendLaxRequestForDocument(textDocument, query);
 }
 
 connection.onHover(
@@ -574,36 +616,37 @@ connection.onHover(
 					" in " + textDocumentPosition.textDocument.uri);
 		const textDoc = documents.get(textDocumentPosition.textDocument.uri);
 		if (!textDoc) { return {contents: ""}; }
-		const hoverInfo = findWordAtPosition(textDoc, textDocumentPosition.position);
-		const uri = textDocumentPosition.textDocument.uri;
-		const doc_state = documentState.get(uri);
-		const range = rangeAsFStarRange(hoverInfo.range);
-		if (!doc_state) { return {contents: ""}; }
-		const rangeKey = JSON.stringify(range);
-		console.log("Looking for hover info at " + rangeKey);
-		const result = doc_state.hover_info.get(rangeKey);
-		if (result) { //} && result.symbol == hoverInfo.word) { 
-			return {contents: {kind:'plaintext', value:result.name + "\n" + result.type}};
+		const symbol = findIdeSymbolAtPosition(textDoc, textDocumentPosition.position);
+		if (!symbol) { return {contents: "No symbol info"}; }	
+		if (symbol && symbol.symbolInfo) { //} && result.symbol == hoverInfo.word) { 
+			return {
+				contents: {
+					kind:'plaintext',
+					value:symbol.symbolInfo.name + "\n" + symbol.symbolInfo.type
+				}
+			};
 		}
-		const filePath = URI.parse(uri).fsPath;
-		const query = {
-			query:"lookup",
-			args: {
-				context:"code",
-				symbol:hoverInfo.word,
-				"requested-info":["type","documentation"],
-				location:{
-					filename:filePath,
-					line:textDocumentPosition.position.line+1,
-					column:textDocumentPosition.position.character
-				},
-				"symbol-range" : range
-			}
-		};
-		sendLaxRequestForDocument(textDoc, query);
-		return {contents: {kind:'plaintext', value:"Loading hover at: " + hoverInfo.word}};
+		requestSymbolInfo(textDoc, textDocumentPosition.position, symbol.wordAndRange);
+		return {contents: {kind:'plaintext', value:"Loading hover at: " + symbol.wordAndRange.word}};
 	}
 );
+
+connection.onDefinition((defParams : DefinitionParams) => {
+	const textDoc = documents.get(defParams.textDocument.uri);
+	if (!textDoc) { return []; }
+	const symbol = findIdeSymbolAtPosition(textDoc, defParams.position);
+	if (!symbol) { return []; }
+	if (symbol && symbol.symbolInfo) {
+		const defined_at = symbol.symbolInfo["defined-at"];
+		if (!defined_at) { return []; }		
+		const range = rangeOfFStarRange(defined_at);
+		const uri = defined_at.fname == "<input>" ? textDoc.uri : pathToFileURL(defined_at.fname).toString();
+		const location = LocationLink.create(uri, range, range);
+		return [location];
+	}
+	requestSymbolInfo(textDoc, defParams.position, symbol.wordAndRange);
+	return [];
+ });
 
 // Make the text document manager listen on the connection
 // for open, change and close text document events
