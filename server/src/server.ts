@@ -222,11 +222,71 @@ interface IdeSymbol {
 	symbol:string;
 }
 
+// This is a sample proof state JSON:
+// {"label":"A","depth":0,"urgency":1,"goals":[{"hyps":[{"name":"uu___","type":"unit"}],"goal":{"witness":"(*?u35*) _","type":"squash (z == 13)","label":""}}],"smt-goals":[],"location":{"fname":"<input>","beg":[36,22],"end":[36,34]}}
+interface IdeProofStateGoal {
+	witness:string;
+	type:string;
+	label:string;
+}
+
+interface IdeProofStateContextualGoal {
+	hyps: {
+		name:string;
+		type:string;
+	} [];
+	goal: IdeProofStateGoal;
+}
+
+function formatProofStateContextualGoal(goal: IdeProofStateContextualGoal) : string {
+	let result = "";
+	for (const hyp of goal.hyps) {
+		result += hyp.name + " : " + hyp.type + "\n";
+	}
+	result += "------------------\n";
+	result += goal.goal.witness + " : " + goal.goal.type;
+	return result;
+}
+
+interface IdeProofState {
+	label:string;
+	depth:number;
+	urgency:number;
+	goals: IdeProofStateContextualGoal [];
+	"smt-goals" : IdeProofStateContextualGoal[];
+	location: FStarRange;
+}
+
+function formatContextualGoalArray(goals: IdeProofStateContextualGoal[]) : string {
+	let result = "";
+	let goal_ctr = 1;
+	const n_goals = goals.length;
+	goals.forEach((g) => {
+		result += "Goal " + goal_ctr + " of " + n_goals + " :\n";
+		result += formatProofStateContextualGoal(g) + "\n";
+		goal_ctr++;
+	});
+	return result;
+}
+
+function formatIdeProofState(ps: IdeProofState) : string {
+	let result = "";
+	result += "Label: " + ps.label + "\n";
+	// result += "Depth: " + ps.depth + "\n";
+	// result += "Urgency: " + ps.urgency + "\n";
+	result += "Goals:\n";
+	result += formatContextualGoalArray(ps.goals);
+	result += "SMT Goals:\n";
+	result += formatContextualGoalArray(ps["smt-goals"]);
+	return result;
+}
+
 interface IDEState {
 	fstar_ide: cp.ChildProcess;
 	fstar_lax_ide: cp.ChildProcess;
 	last_query_id: number;
-	hover_info: Map<string, IdeSymbol>;
+	hover_symbol_info: Map<string, IdeSymbol>;
+	hover_proofstate_info: Map<number, IdeProofState>;
 }
 
 interface FStarConfig {
@@ -247,25 +307,8 @@ connection.onDidChangeConfiguration(change => {
 			(change.settings.languageServerExample || defaultSettings)
 		);
 	}
-
-	// Revalidate all open text documents
     //documents.all().forEach(validateFTextDocument);
 });
-
-function getDocumentSettings(resource: string): Thenable<ExampleSettings> {
-	if (!hasConfigurationCapability) {
-		return Promise.resolve(globalSettings);
-	}
-	let result = documentSettings.get(resource);
-	if (!result) {
-		result = connection.workspace.getConfiguration({
-			scopeUri: resource,
-			section: 'languageServerExample'
-		});
-		documentSettings.set(resource, result);
-	}
-	return result;
-}
 
 function mkPosition(pos: number []) : Position {
 	//F* line numbers begin at 1; unskew
@@ -318,7 +361,7 @@ function rangeOfFStarRange (rng: FStarRange) : Range {
 
 function rangeAsFStarRange (rng: Range) : FStarRange {
 	return {
-		fname: "",
+		fname: "<input>",
 		beg: [rng.start.line + 1, rng.start.character],
 		end: [rng.end.line + 1, rng.end.character]
 	};
@@ -327,9 +370,19 @@ function rangeAsFStarRange (rng: Range) : FStarRange {
 function handleIdeSymbol(textDocument: TextDocument, response : IdeSymbol) {
 	console.log("Got ide symbol " +JSON.stringify(response));
 	const rng = JSON.stringify(response["symbol-range"]);
-	const hoverMap = documentState.get(textDocument.uri)?.hover_info;
-	if (hoverMap) {
-		hoverMap.set(rng, response);
+	const hoverSymbolMap = documentState.get(textDocument.uri)?.hover_symbol_info;
+	if (hoverSymbolMap) {
+		hoverSymbolMap.set(rng, response);
+	}
+}
+
+function handleIdeProofState (textDocument: TextDocument, response : IdeProofState) {
+	console.log("Got ide proof state " + JSON.stringify(response));
+	const range_key = response.location.beg[0];
+	const hoverProofStateMap = documentState.get(textDocument.uri)?.hover_proofstate_info;
+	if (hoverProofStateMap) {
+		console.log("Setting proof state hover info at line: " +range_key);
+		hoverProofStateMap.set(range_key, response);
 	}
 }
 
@@ -360,6 +413,10 @@ function handleOneResponseForDocument(textDocument: TextDocument, data:string) {
 	else if (r.kind == "message" && r.level == "progress") {
 		console.log("Got progress message: " +data);
 		return handleIdeProgress(textDocument, r.contents);
+	}
+	else if (r.kind == "message" && r.level == "proof-state") {
+		if (!r.contents) { return; }
+		return handleIdeProofState(textDocument, r.contents);
 	}
 	else if (r.kind == "response" && r.status == "failure") {
 		if (!r.response) { return; }
@@ -484,7 +541,8 @@ documents.onDidOpen( e => {
 						fstar_ide: fstar_ide,
 						fstar_lax_ide: fstar_lax_ide,
 						last_query_id: 0,
-						hover_info: new Map()
+						hover_symbol_info: new Map(),
+						hover_proofstate_info: new Map()
 					});
 	fstar_ide.stdin.setDefaultEncoding('utf-8');
 	fstar_ide.stdout.on('data', (data) => { handleFStarResponseForDocument(e.document, data); });
@@ -585,8 +643,17 @@ function findIdeSymbolAtPosition(textDocument: TextDocument, position: Position)
 	const range = wordAndRange.range;
 	const rangeKey = JSON.stringify(range);
 	console.log("Looking for symbol info at " + rangeKey);
-	const result = doc_state.hover_info.get(rangeKey);
+	const result = doc_state.hover_symbol_info.get(rangeKey);
 	return { symbolInfo: result, wordAndRange: wordAndRange };
+}
+
+function findIdeProofStateAtLine(textDocument: TextDocument, position: Position) {
+	const uri = textDocument.uri;
+	const doc_state = documentState.get(uri);
+	if (!doc_state) { return; }
+	const rangeKey = position.line + 1;
+	console.log("Looking for proof info at  " + rangeKey);
+	return doc_state.hover_proofstate_info.get(rangeKey);
 }
 
 function requestSymbolInfo(textDocument: TextDocument, position: Position, wordAndRange : WordAndRange) : void {
@@ -609,6 +676,15 @@ function requestSymbolInfo(textDocument: TextDocument, position: Position, wordA
 	sendLaxRequestForDocument(textDocument, query);
 }
 
+function formatIdeSymbol(symbol:  IdeSymbol) : Hover {
+	return {
+			contents: {
+				kind:'markdown',
+				value:"```fstar\n" + symbol.name + ":\n" + symbol.type + "\n```\n"
+			}
+	};
+}
+
 connection.onHover(
 	(textDocumentPosition: TextDocumentPositionParams): Hover => {
 		console.log("Hover: " + textDocumentPosition.position.line + 
@@ -616,15 +692,19 @@ connection.onHover(
 					" in " + textDocumentPosition.textDocument.uri);
 		const textDoc = documents.get(textDocumentPosition.textDocument.uri);
 		if (!textDoc) { return {contents: ""}; }
+		const proofState = findIdeProofStateAtLine(textDoc, textDocumentPosition.position);
+		if (proofState) {
+			return {
+				contents: {
+					kind:'markdown',
+					value:"```fstar\n" + formatIdeProofState(proofState) + "\n```\n"
+				}
+			};
+		}
 		const symbol = findIdeSymbolAtPosition(textDoc, textDocumentPosition.position);
 		if (!symbol) { return {contents: "No symbol info"}; }	
 		if (symbol && symbol.symbolInfo) { //} && result.symbol == hoverInfo.word) { 
-			return {
-				contents: {
-					kind:'plaintext',
-					value:symbol.symbolInfo.name + "\n" + symbol.symbolInfo.type
-				}
-			};
+			return formatIdeSymbol(symbol.symbolInfo);
 		}
 		requestSymbolInfo(textDoc, textDocumentPosition.position, symbol.wordAndRange);
 		return {contents: {kind:'plaintext', value:"Loading hover at: " + symbol.wordAndRange.word}};
@@ -637,7 +717,8 @@ connection.onDefinition((defParams : DefinitionParams) => {
 	const symbol = findIdeSymbolAtPosition(textDoc, defParams.position);
 	if (!symbol) { return []; }
 	if (symbol && symbol.symbolInfo) {
-		const defined_at = symbol.symbolInfo["defined-at"];
+		const sym = symbol.symbolInfo;
+		const defined_at = sym["defined-at"];
 		if (!defined_at) { return []; }		
 		const range = rangeOfFStarRange(defined_at);
 		const uri = defined_at.fname == "<input>" ? textDoc.uri : pathToFileURL(defined_at.fname).toString();
