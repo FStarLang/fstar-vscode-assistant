@@ -40,7 +40,290 @@ import path = require('path');
 import * as fs from 'fs';
 import { pathToFileURL } from 'url';
 
-// Define a function that takes a directory path and a file path
+////////////////////////////////////////////////////////////////////////////////////
+// The state of the LSP server
+////////////////////////////////////////////////////////////////////////////////////
+
+interface IDEState {
+	// The main fstar.exe process for verifying the current document
+	fstar_ide: cp.ChildProcess;
+	// The fstar.exe process for quickly handling on-change events, symbol lookup etc
+	fstar_lax_ide: cp.ChildProcess;
+	// Every query sent to fstar_ide & fstar_lax_ide is assigned a unique id
+	last_query_id: number;
+	// A symbol-info table populated by fstar_lax_ide for onHover and onDefinition requests
+	hover_symbol_info: Map<string, IdeSymbol>;
+	// A proof-state table populated by fstar_ide when running tactics, displayed in onHover
+	hover_proofstate_info: Map<number, IdeProofState>;
+}
+
+const documentStates: Map<string, IDEState> = new Map();
+
+////////////////////////////////////////////////////////////////////////////////////
+// Workspace config files
+////////////////////////////////////////////////////////////////////////////////////
+
+// The type of an .fst.config.json file
+interface FStarConfig {
+	include_dirs:string []; // --include paths
+	options:string [];      // other options to be passed to fstar.exe
+	fstar_exe:string;       // path to fstar.exe
+	cwd: string;            // working directory for fstar.exe (usually not specified; defaults to workspace root)
+}
+
+// All the open workspace folders
+let workspaceFolders : WorkspaceFolder [] = [];
+
+// Config files in the workspace root folders
+const workspaceConfigs: Map<string, FStarConfig []> = new Map();
+
+////////////////////////////////////////////////////////////////////////////////////
+// Response messages in the IDE protocol that fstar.exe uses
+////////////////////////////////////////////////////////////////////////////////////
+
+// ProtocolInfo: The first response from fstar.exe when it is first launched
+interface ProtocolInfo {
+	kind:'protocol-info';
+	version:number;
+	features:string [];
+}
+
+// An FStarRange is a range of positions in some source file
+// A position is a line number and a column number
+// A quirk is that the line number is 1-based, but the column number is 0-based
+// In contrast, the LSP protocol uses 0-based line and column numbers
+// So, we need to convert between the two
+interface FStarRange {
+	fname:string;
+	beg: number [];
+	end: number []
+}
+
+// IdeSymbol: This message is sent from fstar.exe in response to a
+// request for a onHover or onDefnition symbol lookup
+interface IdeSymbol {
+	kind:'symbol';
+	name:string;
+	type:string;
+	documentation:string;
+	definition:string;
+	"defined-at": FStarRange;
+	"symbol-range":FStarRange;
+	symbol:string;
+}
+
+// IdeProofState: fstar.exe sends informative messages when running tactics
+// The server does not explicitly request the proof state---these messages
+// are just sent by fstar.exe as a side-effect of running tactics
+// The server stores the proof state in a table, and uses it to display
+// the proof state in the onHover message
+interface IdeProofState {
+	label:string; // User-provided label, e.g., dump "A"
+	depth:number; // The depth of this dump message (not displayed)
+	urgency:number; // Urgency (not displayed)
+	goals: IdeProofStateContextualGoal []; // The main proof state
+	"smt-goals" : IdeProofStateContextualGoal[]; // SMT goals
+	location: FStarRange; // The location of the tactic that triggered a proof state dump
+}
+
+// A Contextual goal is a goal with all the hypothesis in context
+interface IdeProofStateContextualGoal {
+	hyps: {
+		name:string;
+		type:string;
+	} [];
+	goal: IdeProofStateGoal;
+}
+
+// A goal itself is a witness and a type, with a label
+interface IdeProofStateGoal {
+	witness:string;
+	type:string;
+	label:string;
+}
+
+// IDEError: fstar.exe sends this message when reporting errors and warnings
+interface IdeError {
+	message: string;
+	level : 'warning' | 'error' | 'info';
+	ranges: FStarRange[];
+}
+
+interface IdeProgress {
+	stage: 'full-buffer-fragment-ok';
+	ranges: FStarRange;
+}
+
+// A query response envelope
+interface IdeQueryResponse {
+	'query-id': string;
+	kind: 'protocol-info' | 'response' | 'message';
+	status?: 'success' | 'failure';
+	level?: 'progress' | 'proof-state';
+	response?: IdeSymbol | IdeError[];
+	contents?: IdeProofState | IdeSymbol | IdeProgress;
+}
+
+type IdeResponse = IdeQueryResponse | ProtocolInfo
+
+////////////////////////////////////////////////////////////////////////////////////
+// Request messages in the IDE protocol that fstar.exe uses
+////////////////////////////////////////////////////////////////////////////////////
+
+// The first request from LSP to fstar.exe is a vfs-add, just to record that a file
+// has been opened. The filename is usually null. It's not clear that this message
+// is actually required, however, fstar-mode.el sends it, so we do too.
+interface VfsAdd {
+	query: 'vfs-add';
+	args: { 
+		filename: string | null; 
+		contents: string
+	};
+}
+
+// On document open, at each change event, and on document save
+// fstar.exe is sent a FullBufferQuery
+//
+// Note, there is no 'lax' kind: A query is a lax check if it is sent to fstar_lax_ide
+//
+// On document open:
+//    A 'full' query is sent to both fstar_ide and fstar_lax_ide
+//
+// On document change:
+//    A 'full' query is sent to fstar_lax_ide, which responds with any errors and warnings
+//
+//    A 'cache' query is sent to fstar_ide, which responds with the prefix of the buffer
+//    that remains verifed
+//
+// On document save:
+//    A 'full' query is sent to fstar_ide to re-verify the entire document
+//
+// It's the job of fstar.exe to deal with incrementality. It does that by maintaining its
+// own internal state and only checking the part of the buffer that has changed.
+interface FullBufferQuery {
+	query: 'full-buffer';
+	args:{
+		kind:'full' | 'cache';
+		code:string;
+		line:number;
+		column:number
+	} 
+}
+
+// A LookupQuery is sent to fstar_lax_ide to get symbol information for onHover and onDefinition
+interface LookupQuery {
+	query: 'lookup';
+	args: {
+		context:'code';
+		symbol:string;
+		"requested-info":('type' | 'documentation' | 'defined-at') [];
+		// The exact position at which the user hovered
+		location:{
+			filename:string;
+			line:number;
+			column:number;
+		},
+		// The range of the word at which the user hovered
+		// fstar.exe echoes this back when it responds
+		// and we use this to lookup the symbol table when
+		// the user hovers or requests the definition of that word
+		"symbol-range" : FStarRange
+	}
+}
+
+// Some utilities to send messages to fstar_ide or fstar_lax_ide
+// Sending a request to either fstar_ide or fstar_lax_ide
+// Wraps the request with a fresh query-id
+function sendRequestForDocument(textDocument : TextDocument, msg:any, lax?:'lax') {
+	const doc_state = documentStates.get(textDocument.uri);
+	if (!doc_state) {
+		return;
+	}
+	else {
+		const qid = doc_state.last_query_id;
+		doc_state.last_query_id = qid + 1;
+		msg["query-id"] = '' + (qid + 1);
+		const text = JSON.stringify(msg);
+		const proc = lax ? doc_state.fstar_lax_ide : doc_state.fstar_ide;
+		// console.log("Sending message: " +text);
+		proc?.stdin?.write(text);
+		proc?.stdin?.write("\n");
+	}
+}
+
+// Sending a FullBufferQuery to fstar_ide or fstar_lax_ide
+function validateFStarDocument(textDocument: TextDocument, kind:'full'|'cache', lax?:'lax') {
+	console.log("ValidateFStarDocument( " + textDocument.uri + ", " + kind + ", lax=" + lax + ")");
+	connection.sendDiagnostics({uri:textDocument.uri, diagnostics:[]});
+	if (!lax) {
+		// If this is non-lax requests, send a status clear messages to VSCode
+		// to clear the gutter icons and error squiggles
+		// They will be reported again if the document is not verified
+		sendStatusClear({uri:textDocument.uri});
+	}
+	if (supportsFullBuffer) {
+		const push_context : FullBufferQuery = { 
+			query:"full-buffer",
+			args:{
+				kind:kind,
+				code:textDocument.getText(),
+				line:0,
+				column:0
+			}
+		};
+		sendRequestForDocument(textDocument, push_context, lax);
+	}
+}
+
+interface WordAndRange {
+	word: string;
+	range: FStarRange;
+}
+
+// Sending a LookupQuery to fstar_lax_ide
+function requestSymbolInfo(textDocument: TextDocument, position: Position, wordAndRange : WordAndRange) : void {
+	const uri = textDocument.uri;
+	const filePath = URI.parse(uri).fsPath;
+	const query : LookupQuery = {
+		query:"lookup",
+		args: {
+			context:"code",
+			symbol:wordAndRange.word,
+			"requested-info":["type","documentation","defined-at"],
+			location:{
+				filename:filePath,
+				line:position.line+1,
+				column:position.character
+			},
+			"symbol-range" : wordAndRange.range
+		}
+	};
+	sendRequestForDocument(textDocument, query, 'lax');
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+// Messages in a small custom protocol between this server and the client
+// (running on top of LSP)
+////////////////////////////////////////////////////////////////////////////////////
+
+// A message to clear all gutter icons for the document with the given URI
+interface StatusClearMessage {
+	uri: string;
+}
+
+// A message to dislay check-mark gutter icons for the document of the given URI
+// at the given ranges
+interface StatusOkMessage {
+	uri: string;
+	ranges: Range []; // A VSCode range, not an FStarRange
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+// PATH and URI Utilities
+////////////////////////////////////////////////////////////////////////////////////
+
+// Checks if filePath is includes in the cone rooted at dirPath
+// Used to check if a file is in the workspace
 function checkFileInDirectory(dirPath : string, filePath :string) : boolean {
 	// Check if dirPath is a directory using fs.stat()
 	const stats = fs.statSync(dirPath);
@@ -62,43 +345,10 @@ function checkFileInDirectory(dirPath : string, filePath :string) : boolean {
 	} 
 }
 
-// Create a connection for the server, using Node's IPC as a transport.
-// Also include all preview / proposed LSP features.
-const connection = createConnection(ProposedFeatures.all);
 
-// Messags in the small protocol running on top of LSP between the server and client
-interface StatusOkMessage {
-	uri: string;
-	ranges: Range [];
-}
-
-interface StatusClearMessage {
-	uri: string;
-}
-
-function sendStatusOk (msg : StatusOkMessage)  {
-	console.log("Sending statusOk notification: " +msg);
-	connection.sendNotification('custom/statusOk', msg);
-}
-
-
-function sendStatusClear (msg: StatusClearMessage) {
-	console.log("Sending statusClear notification: " +msg);
-	connection.sendNotification('custom/statusClear', msg);
-}
-
-// Create a simple text document manager.
-const documents: TextDocuments<TextDocument> = new TextDocuments(TextDocument);
-let workspaceFolders : WorkspaceFolder [] = [];
-const workspaceConfigs: Map<string, FStarConfig []> = new Map();
-
-let hasConfigurationCapability = false;
-let hasWorkspaceFolderCapability = false;
-let hasDiagnosticRelatedInformationCapability = false;
-let supportsFullBuffer = true;
-
-
-// Define a function that takes a folder path and an extension
+// Finds all files in a folder whose name has `extension` as a suffix
+// Returns an array of absolute paths of the files
+// Used to find all config files in the workspace
 function findFilesByExtension(folderPath:string, extension:string) {
 	// Read the folder contents using fs.readdir()
 	const matches : string[] = [];
@@ -118,381 +368,9 @@ function findFilesByExtension(folderPath:string, extension:string) {
 	}
 	return matches;
 }
-	
-connection.onInitialize((params: InitializeParams) => {
-	console.log("onInitialize!");
-	const capabilities = params.capabilities;
-	if (params.workspaceFolders) {
-		params.workspaceFolders?.forEach(folder => {
-			const folderPath = URI.parse(folder.uri).fsPath;
-			const folderConfigs : FStarConfig[] = [];
-			console.log("Searchig in " +folderPath + " for .fst.config.json");
-			findFilesByExtension(folderPath, ".fst.config.json").forEach(configFile => {
-				console.log("Found config file " + configFile);
-				const contents = fs.readFileSync(configFile, 'utf8');
-				console.log("File cotents: " + contents + "");
-				const config = JSON.parse(contents);
-				if (!config.cwd) {
-					config.cwd = folderPath;
-				}
-				folderConfigs.push(config);
-			});
-			console.log("Settig workspaceConfigs for " +folderPath + " to " + JSON.stringify(folderConfigs));
-			workspaceConfigs.set(folderPath, folderConfigs);			
-		});
-		workspaceFolders = params.workspaceFolders;
-	}
 
-	// Does the client support the `workspace/configuration` request?
-	// If not, we fall back using global settings.
-	hasConfigurationCapability = !!(
-		capabilities.workspace && !!capabilities.workspace.configuration
-	);
-	hasWorkspaceFolderCapability = !!(
-		capabilities.workspace && !!capabilities.workspace.workspaceFolders
-	);
-	hasDiagnosticRelatedInformationCapability = !!(
-		capabilities.textDocument &&
-		capabilities.textDocument.publishDiagnostics &&
-		capabilities.textDocument.publishDiagnostics.relatedInformation
-	);
-	const result: InitializeResult = {
-		capabilities: {
-			textDocumentSync: TextDocumentSyncKind.Incremental,
-			// Tell the client that this server supports code completion.
-			completionProvider: {
-				resolveProvider: true
-			},
-			hoverProvider: true,
-			definitionProvider: true
-		}
-	};
-	if (hasWorkspaceFolderCapability) {
-		result.capabilities.workspace = {
-			workspaceFolders: {
-				supported: true
-			}
-		};
-	}
-	return result;
-});
-
-connection.onInitialized(() => {
-	if (hasConfigurationCapability) {
-		// Register for all configuration changes.
-		connection.client.register(DidChangeConfigurationNotification.type, undefined);
-	}
-	if (hasWorkspaceFolderCapability) {
-		connection.workspace.onDidChangeWorkspaceFolders(_event => {
-			connection.console.log('Workspace folder change event received.');
-		});
-	}
-});
-
-// The example settings
-interface ExampleSettings {
-	maxNumberOfProblems: number;
-}
-
-// The global settings, used when the `workspace/configuration` request is not supported by the client.
-// Please note that this is not the case when using this server with the client provided in this example
-// but could happen with other clients.
-const defaultSettings: ExampleSettings = { maxNumberOfProblems: 1000 };
-let globalSettings: ExampleSettings = defaultSettings;
-
-// Cache the settings of all open documents
-const documentSettings: Map<string, Thenable<ExampleSettings>> = new Map();
-
-
-// Cache the settings of all open documents
-interface FStarRange {
-	fname:string;
-	beg: number [];
-	end: number []
-}
-
-interface IdeSymbol {
-	kind:'symbol';
-	name:string;
-	type:string;
-	documentation:string;
-	definition:string;
-	"defined-at": FStarRange;
-	"symbol-range":FStarRange;
-	symbol:string;
-}
-
-// This is a sample proof state JSON:
-// {"label":"A","depth":0,"urgency":1,"goals":[{"hyps":[{"name":"uu___","type":"unit"}],"goal":{"witness":"(*?u35*) _","type":"squash (z == 13)","label":""}}],"smt-goals":[],"location":{"fname":"<input>","beg":[36,22],"end":[36,34]}}
-interface IdeProofStateGoal {
-	witness:string;
-	type:string;
-	label:string;
-}
-
-interface IdeProofStateContextualGoal {
-	hyps: {
-		name:string;
-		type:string;
-	} [];
-	goal: IdeProofStateGoal;
-}
-
-function formatProofStateContextualGoal(goal: IdeProofStateContextualGoal) : string {
-	let result = "";
-	for (const hyp of goal.hyps) {
-		result += hyp.name + " : " + hyp.type + "\n";
-	}
-	result += "------------------\n";
-	result += goal.goal.witness + " : " + goal.goal.type;
-	return result;
-}
-
-interface IdeProofState {
-	label:string;
-	depth:number;
-	urgency:number;
-	goals: IdeProofStateContextualGoal [];
-	"smt-goals" : IdeProofStateContextualGoal[];
-	location: FStarRange;
-}
-
-function formatContextualGoalArray(goals: IdeProofStateContextualGoal[]) : string {
-	let result = "";
-	let goal_ctr = 1;
-	const n_goals = goals.length;
-	goals.forEach((g) => {
-		result += "Goal " + goal_ctr + " of " + n_goals + " :\n";
-		result += formatProofStateContextualGoal(g) + "\n";
-		goal_ctr++;
-	});
-	return result;
-}
-
-function formatIdeProofState(ps: IdeProofState) : string {
-	let result = "";
-	result += "Label: " + ps.label + "\n";
-	// result += "Depth: " + ps.depth + "\n";
-	// result += "Urgency: " + ps.urgency + "\n";
-	result += "Goals:\n";
-	result += formatContextualGoalArray(ps.goals);
-	result += "SMT Goals:\n";
-	result += formatContextualGoalArray(ps["smt-goals"]);
-	return result;
-}
-
-interface IDEState {
-	fstar_ide: cp.ChildProcess;
-	fstar_lax_ide: cp.ChildProcess;
-	last_query_id: number;
-	hover_symbol_info: Map<string, IdeSymbol>;
-	hover_proofstate_info: Map<number, IdeProofState>;
-}
-
-interface FStarConfig {
-	include_dirs:string [];
-	options:string [];
-	fstar_exe:string;
-	cwd: string;
-}
-
-const documentState: Map<string, IDEState> = new Map();
-
-connection.onDidChangeConfiguration(change => {
-	if (hasConfigurationCapability) {
-		// Reset all cached document settings
-		documentSettings.clear();
-	} else {
-		globalSettings = <ExampleSettings>(
-			(change.settings.languageServerExample || defaultSettings)
-		);
-	}
-    //documents.all().forEach(validateFTextDocument);
-});
-
-function mkPosition(pos: number []) : Position {
-	//F* line numbers begin at 1; unskew
-	return Position.create(pos[0] > 0 ? pos[0] - 1 : pos[0], pos[1]);
-}
-
-interface ProtocolInfo {
-	version:number;
-	features:string [];
-}
-
-function handleIdeProtocolInfo(textDocument: TextDocument, pi : ProtocolInfo) {
-	console.log ("FStar ide returned protocol info");
-	if (!pi.features.includes("full-buffer")) {
-		supportsFullBuffer = false;
-		console.log("fstar.exe does not support full-buffer queries.");
-	}
-} 
-
-function handleIdeProgress(textDocument: TextDocument, contents : any) {
-	if (contents.stage == "full-buffer-fragment-ok" ) {
-		const rng = contents.ranges;
-		const ok_range = Range.create(mkPosition(rng.beg), mkPosition(rng.end));
-		const msg = {
-			uri: textDocument.uri,
-			ranges: [ok_range]
-		};
-		sendStatusOk(msg);
-	}
-}
-
-interface IdeError {
-	message: string;
-	level : string;
-	ranges: FStarRange[];
-}
-
-function ideErrorLevelAsDiagnosticSeverity (level: string) : DiagnosticSeverity {
-	switch (level) {
-		case "warning": return DiagnosticSeverity.Warning;
-		case "error": return DiagnosticSeverity.Error;
-		case "info": return DiagnosticSeverity.Information;
-		default: return DiagnosticSeverity.Error;
-	}
-}
-
-function rangeOfFStarRange (rng: FStarRange) : Range {
-	return Range.create(mkPosition(rng.beg), mkPosition(rng.end));
-}
-
-function rangeAsFStarRange (rng: Range) : FStarRange {
-	return {
-		fname: "<input>",
-		beg: [rng.start.line + 1, rng.start.character],
-		end: [rng.end.line + 1, rng.end.character]
-	};
-}
-
-function handleIdeSymbol(textDocument: TextDocument, response : IdeSymbol) {
-	console.log("Got ide symbol " +JSON.stringify(response));
-	const rng = JSON.stringify(response["symbol-range"]);
-	const hoverSymbolMap = documentState.get(textDocument.uri)?.hover_symbol_info;
-	if (hoverSymbolMap) {
-		hoverSymbolMap.set(rng, response);
-	}
-}
-
-function handleIdeProofState (textDocument: TextDocument, response : IdeProofState) {
-	console.log("Got ide proof state " + JSON.stringify(response));
-	const range_key = response.location.beg[0];
-	const hoverProofStateMap = documentState.get(textDocument.uri)?.hover_proofstate_info;
-	if (hoverProofStateMap) {
-		console.log("Setting proof state hover info at line: " +range_key);
-		hoverProofStateMap.set(range_key, response);
-	}
-}
-
-function handleIdeDiagnostics (textDocument : TextDocument, response : IdeError []) {
-	if (!response || !(Array.isArray(response))) { return; }
-	response.forEach((err) => {
-		err.ranges.forEach ((rng) => {
-			const diag = {
-				severity: ideErrorLevelAsDiagnosticSeverity(err.level),
-				range: {
-					start: mkPosition(rng.beg),
-					end: mkPosition(rng.end)
-				},
-				message: err.message
-			};
-			connection.sendDiagnostics({uri:textDocument.uri, diagnostics:[diag]});
-		});
-	}); 
-}
-
-function handleOneResponseForDocument(textDocument: TextDocument, data:string) {
-	console.log("handleOneResponse: <" +data+ ">");
-	if (data == "") { return; }
-	const r = JSON.parse(data);
-	if (r.kind == "protocol-info") {
-		return handleIdeProtocolInfo(textDocument, r);
-	}
-	else if (r.kind == "message" && r.level == "progress") {
-		console.log("Got progress message: " +data);
-		return handleIdeProgress(textDocument, r.contents);
-	}
-	else if (r.kind == "message" && r.level == "proof-state") {
-		if (!r.contents) { return; }
-		return handleIdeProofState(textDocument, r.contents);
-	}
-	else if (r.kind == "response" && r.status == "failure") {
-		if (!r.response) { return; }
-		return handleIdeDiagnostics(textDocument, r.response);
-	}
-	else if (r.kind == "response" && r.status == "success") { 
-		if (!r.response) { return; }
-		return handleIdeDiagnostics(textDocument, r.response);
-	}
-	else {
-		console.log("Unhandled response: " + r.kind);
-	}
-}
-
-function handleFStarResponseForDocument(textDocument: TextDocument, data:string) {
-	// console.log("Got raw response: " +typeof(data) + " :: " +data);
-	const lines = data.toString().split('\n');
-	lines.forEach(line => { handleOneResponseForDocument(textDocument, line);  });
-}
-
-function handleOneLaxResponseForDocument(textDocument: TextDocument, data:string) {
-	// console.log("handleOneResponse: <" +data+ ">");
-	if (data == "") { return; }
-	const r = JSON.parse(data);
-	if (r.kind == "protocol-info") {
-		return handleIdeProtocolInfo(textDocument, r);
-	}
-	else if (r.kind == "message" && r.level == "progress") {
-		return;
-	}
-	else if (r.kind == "response" && r.status == "failure") {
-		if (!r.response) { return; }
-		return handleIdeDiagnostics(textDocument, r.response);
-	}
-	else if (r.kind == "response" && r.status == "success") { 
-		if (!r.response) { return; }
-		if (r.response.kind == "symbol") {
-			return handleIdeSymbol(textDocument, r.response);
-		}
-		return handleIdeDiagnostics(textDocument, r.response);
-	}
-	else {
-		console.log("Unhandled response: " + r.kind);
-	}
-}
-function handleLaxFStarResponseForDocument(textDocument: TextDocument, data:string) {
-	// // console.log("Got raw response: " +typeof(data) + " :: " +data);
-	const lines = data.toString().split('\n');
-	lines.forEach(line => { handleOneLaxResponseForDocument(textDocument, line);  });
-}
-
-function sendRequestForDocument(textDocument : TextDocument, msg:any, lax: boolean) {
-	const doc_state = documentState.get(textDocument.uri);
-	if (!doc_state) {
-		return;
-	}
-	else {
-		const qid = doc_state.last_query_id;
-		doc_state.last_query_id = qid + 1;
-		msg["query-id"] = '' + (qid + 1);
-		const text = JSON.stringify(msg);
-		const proc = lax ? doc_state.fstar_lax_ide : doc_state.fstar_ide;
-		// console.log("Sending message: " +text);
-		proc?.stdin?.write(text);
-		proc?.stdin?.write("\n");
-	}
-}
-
-function sendLaxRequestForDocument(textDocument : TextDocument, msg:any) {
-	sendRequestForDocument(textDocument, msg, true);
-}
-
-function sendFullRequestForDocument(textDocument : TextDocument, msg:any) {
-	sendRequestForDocument(textDocument, msg, false);
-}
-
+// Finds the .fst.config.json for a given file
+// by searching the workspace root folders for a *.fst.config.json file
 function findConfigFile(e : TextDocument) : FStarConfig {
 	const filePath = URI.parse(e.uri).fsPath;
 	let result : FStarConfig = {
@@ -514,84 +392,435 @@ function findConfigFile(e : TextDocument) : FStarConfig {
 	});
 	return result;
 }
+////////////////////////////////////////////////////////////////////////////////////
+// Symbol table and proof state utilities
+////////////////////////////////////////////////////////////////////////////////////
 
+// Print a single ContextualGoal to show in a hover message
+function formatProofStateContextualGoal(goal: IdeProofStateContextualGoal) : string {
+	let result = "";
+	for (const hyp of goal.hyps) {
+		result += hyp.name + " : " + hyp.type + "\n";
+	}
+	result += "------------------ " + goal.goal.witness + "\n";
+	result += goal.goal.type;
+	return result;
+}
+
+// Print an array of ContextualGoals to show in a hover message
+function formatContextualGoalArray(goals: IdeProofStateContextualGoal[]) : string {
+	let result = "";
+	let goal_ctr = 1;
+	const n_goals = goals.length;
+	goals.forEach((g) => {
+		result += "Goal " + goal_ctr + " of " + n_goals + " :\n";
+		result += "```fstar\n" + formatProofStateContextualGoal(g) + "\n```\n\n";
+		goal_ctr++;
+	});
+	return result;
+}
+
+// Print the entire proof state to show in a hover message
+function formatIdeProofState(ps: IdeProofState) : string {
+	let result = "### Proof state \n";
+	result += "(" + ps.label + ")\n";
+	if (ps.goals && ps.goals.length > 0) {
+		result += "**Goals**\n";
+		result += formatContextualGoalArray(ps.goals);
+	}
+	if (ps["smt-goals"] && ps["smt-goals"].length > 0) {		
+		result += "**SMT Goals**\n";
+		result += formatContextualGoalArray(ps["smt-goals"]);
+	}
+	return result;
+}
+
+// Print a single symbol entry to show in a hover message
+function formatIdeSymbol(symbol:  IdeSymbol) : Hover {
+	return {
+			contents: {
+				kind:'markdown',
+				value:"```fstar\n" + symbol.name + ":\n" + symbol.type + "\n```\n"
+			}
+	};
+}
+
+// Find the word at the given position in the given document
+// (used to find the symbol under the cursor)
+function findWordAtPosition(textDocument: TextDocument, position: Position) : WordAndRange {
+	const text = textDocument.getText();
+	const offset = textDocument.offsetAt(position);
+	let start = text.lastIndexOf(' ', offset) + 1;
+	for (let i = offset; i >= start; i--) {
+		if (text.at(i)?.search(/\W/) === 0) {
+			start = i + 1;
+			break;
+		}
+	}
+	const end = text.substring(offset).search(/\W/) + offset;
+	const word = text.substring(start, end > start ? end : undefined);
+	const range = Range.create(textDocument.positionAt(start), textDocument.positionAt(end));
+	return {word: word, range: rangeAsFStarRange(range)};
+}
+
+// Lookup the symbol table for the symbol under the cursor
+function findIdeSymbolAtPosition(textDocument: TextDocument, position: Position) {
+	const uri = textDocument.uri;
+	const doc_state = documentStates.get(uri);
+	if (!doc_state) { return; }
+	const wordAndRange = findWordAtPosition(textDocument, position);
+	const range = wordAndRange.range;
+	const rangeKey = JSON.stringify(range);
+	console.log("Looking for symbol info at " + rangeKey);
+	const result = doc_state.hover_symbol_info.get(rangeKey);
+	return { symbolInfo: result, wordAndRange: wordAndRange };
+}
+
+// Lookup the proof state table for the line at the cursor
+function findIdeProofStateAtLine(textDocument: TextDocument, position: Position) {
+	const uri = textDocument.uri;
+	const doc_state = documentStates.get(uri);
+	if (!doc_state) { return; }
+	const rangeKey = position.line + 1;
+	console.log("Looking for proof info at  " + rangeKey);
+	return doc_state.hover_proofstate_info.get(rangeKey);
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+// Range utilities
+////////////////////////////////////////////////////////////////////////////////////
+function mkPosition(pos: number []) : Position {
+	//F* line numbers begin at 1; unskew
+	return Position.create(pos[0] > 0 ? pos[0] - 1 : pos[0], pos[1]);
+}
+
+function fstarRangeAsRange (rng: FStarRange) : Range {
+	return Range.create(mkPosition(rng.beg), mkPosition(rng.end));
+}
+
+function rangeAsFStarRange (rng: Range) : FStarRange {
+	return {
+		fname: "<input>",
+		beg: [rng.start.line + 1, rng.start.character],
+		end: [rng.end.line + 1, rng.end.character]
+	};
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+// Custom client/server protocol
+////////////////////////////////////////////////////////////////////////////////////
+
+// Create a connection for the server, using Node's IPC as a transport.
+// Also include all preview / proposed LSP features.
+const connection = createConnection(ProposedFeatures.all);
+
+
+function sendStatusOk (msg : StatusOkMessage)  {
+	connection.sendNotification('custom/statusOk', msg);
+}
+
+
+function sendStatusClear (msg: StatusClearMessage) {
+	connection.sendNotification('custom/statusClear', msg);
+}
+
+
+ ///////////////////////////////////////////////////////////////////////////////////
+ // Handling responses from the F* IDE protocol
+ ///////////////////////////////////////////////////////////////////////////////////
+
+ // Event handler for stdout on fstar_ide
+ function handleFStarResponseForDocument(textDocument: TextDocument, data:string, lax:boolean) {
+	const lines = data.toString().split('\n');
+	lines.forEach(line => { handleOneResponseForDocument(textDocument, line, lax);  });
+}
+
+// Main event dispatch for IDE responses
+function handleOneResponseForDocument(textDocument: TextDocument, data:string, lax: boolean) {
+	console.log("handleOneResponse " + (lax? "lax" : "") + ":" +data);
+	if (data == "") { return; }
+	const r : IdeResponse = JSON.parse(data);
+	if (r.kind == "protocol-info") {
+		return handleIdeProtocolInfo(textDocument, r as ProtocolInfo);
+	}
+	else if (r.kind == "message" && r.level == "progress" && !lax) {
+		//Discard progress messages from fstar_lax_ide
+		return handleIdeProgress(textDocument, r.contents as IdeProgress);
+	}
+	else if (r.kind == "message" && r.level == "proof-state") {
+		if (!r.contents) { return; }
+		return handleIdeProofState(textDocument, r.contents as IdeProofState);
+	}
+	else if (r.kind == "response" && r.status == "failure") {
+		if (!r.response) { return; }
+		return handleIdeDiagnostics(textDocument, r.response as IdeError[]);
+	}
+	else if (r.kind == "response" && r.status == "success") { 
+		if (!r.response) { return; }
+		if (Array.isArray(r.response)) {
+			return handleIdeDiagnostics(textDocument, r.response as IdeError[]);
+		}
+		const sym = r.response as IdeSymbol;
+		if (sym.kind == "symbol") {
+			return handleIdeSymbol(textDocument, sym);
+		}
+	}
+	else {
+		console.log("Unhandled response: " + r.kind);
+	}
+}
+
+ // If the F* does not support full-buffer queries, we log it and set a flag
+ function handleIdeProtocolInfo(textDocument: TextDocument, pi : ProtocolInfo) {
+	if (!pi.features.includes("full-buffer")) {
+		supportsFullBuffer = false;
+		console.log("fstar.exe does not support full-buffer queries.");
+	}
+} 
+
+// If we get a response to a symbol query, we store it in the symbol table map
+function handleIdeSymbol(textDocument: TextDocument, response : IdeSymbol) {
+	console.log("Got ide symbol " +JSON.stringify(response));
+	const rng = JSON.stringify(response["symbol-range"]);
+	const hoverSymbolMap = documentStates.get(textDocument.uri)?.hover_symbol_info;
+	if (hoverSymbolMap) {
+		hoverSymbolMap.set(rng, response);
+	}
+}
+
+// If we get a proof state dump message, we store it in the proof state map
+function handleIdeProofState (textDocument: TextDocument, response : IdeProofState) {
+	console.log("Got ide proof state " + JSON.stringify(response));
+	const range_key = response.location.beg[0];
+	const hoverProofStateMap = documentStates.get(textDocument.uri)?.hover_proofstate_info;
+	if (hoverProofStateMap) {
+		console.log("Setting proof state hover info at line: " +range_key);
+		hoverProofStateMap.set(range_key, response);
+	}
+}
+
+// If a declaration in a full-buffer is verified, fstar_ide sends
+// us a full-buffer-fragment-ok message. We use that to send a status-ok
+// message to VSCode, which will clear the error squiggles for that range
+// and show a checkmark in the gutter for those locations
+function handleIdeProgress(textDocument: TextDocument, contents : IdeProgress) {
+	if (contents.stage == "full-buffer-fragment-ok" ) {
+		const rng = contents.ranges;
+		const ok_range = Range.create(mkPosition(rng.beg), mkPosition(rng.end));
+		const msg = {
+			uri: textDocument.uri,
+			ranges: [ok_range]
+		};
+		sendStatusOk(msg);
+	}
+}
+
+// If we get errors and warnings from F*, we send them to VSCode
+// as diagnostics, which will show them as squiggles in the editor
+function handleIdeDiagnostics (textDocument : TextDocument, response : IdeError []) {
+	function ideErrorLevelAsDiagnosticSeverity (level: string) : DiagnosticSeverity {
+		switch (level) {
+			case "warning": return DiagnosticSeverity.Warning;
+			case "error": return DiagnosticSeverity.Error;
+			case "info": return DiagnosticSeverity.Information;
+			default: return DiagnosticSeverity.Error;
+		}
+	}
+	if (!response || !(Array.isArray(response))) { return; }
+	response.forEach((err) => {
+		err.ranges.forEach ((rng) => {
+			const diag = {
+				severity: ideErrorLevelAsDiagnosticSeverity(err.level),
+				range: {
+					start: mkPosition(rng.beg),
+					end: mkPosition(rng.end)
+				},
+				message: err.message
+			};
+			connection.sendDiagnostics({uri:textDocument.uri, diagnostics:[diag]});
+		});
+	}); 
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+// Main event handlers for events triggered by the editor client
+////////////////////////////////////////////////////////////////////////////////////
+// Create a simple text document manager.
+const documents: TextDocuments<TextDocument> = new TextDocuments(TextDocument);
+
+let hasConfigurationCapability = false;
+let hasWorkspaceFolderCapability = false;
+let hasDiagnosticRelatedInformationCapability = false;
+let supportsFullBuffer = true;
+
+// Initialization of the LSP server: Called once when the workspace is opened
+// Advertize the capabilities of the server
+//   - incremental text documentation sync
+//   - completion
+//   - hover
+//   - definitions
+//   - workspaces
+connection.onInitialize((params: InitializeParams) => {
+	function initializeWorkspaceFolder(folder: WorkspaceFolder) {
+		const folderPath = URI.parse(folder.uri).fsPath;
+		const folderConfigs : FStarConfig[] = [];
+		findFilesByExtension(folderPath, ".fst.config.json").forEach(configFile => {
+			console.log("Found config file " + configFile);
+			const contents = fs.readFileSync(configFile, 'utf8');
+			const config = JSON.parse(contents);
+			if (!config.cwd) {
+				config.cwd = folderPath;
+			}
+			folderConfigs.push(config);
+		});
+		return {folderPath, folderConfigs};
+	}
+	const capabilities = params.capabilities;
+	if (params.workspaceFolders) {
+		params.workspaceFolders?.forEach(folder => {
+			const pathAndConfig = initializeWorkspaceFolder(folder);
+			workspaceConfigs.set(pathAndConfig.folderPath, pathAndConfig.folderConfigs);			
+		});
+		workspaceFolders = params.workspaceFolders;
+	}
+
+	// Does the client support the `workspace/configuration` request?
+	// If not, we fall back using global settings.
+	// This is left-over from the lsp-sample
+	// We don't do anything special with configuations yet
+	hasConfigurationCapability = !!(
+		capabilities.workspace && !!capabilities.workspace.configuration
+	);
+	hasWorkspaceFolderCapability = !!(
+		capabilities.workspace && !!capabilities.workspace.workspaceFolders
+	);
+	hasDiagnosticRelatedInformationCapability = !!(
+		capabilities.textDocument &&
+		capabilities.textDocument.publishDiagnostics &&
+		capabilities.textDocument.publishDiagnostics.relatedInformation
+	);
+	const result: InitializeResult = {
+		capabilities: {
+			textDocumentSync: TextDocumentSyncKind.Incremental,
+			// Tell the client that this server supports code completion.
+			// This is left-over from the lsp-sample
+			// We should provide a completion provider, but we don't yet
+			completionProvider: {
+				resolveProvider: true
+			},
+			hoverProvider: true,
+			definitionProvider: true
+		}
+	};
+	// Workspace folders: We use them for .fst.config.json files
+	if (hasWorkspaceFolderCapability) {
+		result.capabilities.workspace = {
+			workspaceFolders: {
+				supported: true
+			}
+		};
+	}
+	return result;
+});
+
+// The client acknowledged the initialization
+connection.onInitialized(() => {
+	if (hasConfigurationCapability) {
+		// Register for all configuration changes.
+		connection.client.register(DidChangeConfigurationNotification.type, undefined);
+	}
+	if (hasWorkspaceFolderCapability) {
+		connection.workspace.onDidChangeWorkspaceFolders(_event => {
+			// We don't do anything special when workspace folders change
+			// We should probably reset the workspace configs and re-read the .fst.config.json files
+			connection.console.log('Workspace folder change event received.');
+		});
+	}
+});
+
+// We don't do anything special when the configuration changes
+connection.onDidChangeConfiguration(change => {
+	return;
+});
+
+// The main entry point when a document is opened
+//  * find the .fst.config.json file for the document in the workspace, otherwise use a default config
+//  * spawn 2 fstar processes: one for typechecking, one lax process for fly-checking and symbol lookup
+//  * set event handlers to read the output of the fstar processes
+//  * send the current document to both processes to start typechecking
 documents.onDidOpen( e => {
+	// The document in the current editor
 	const textDocument = e.document;
+
+	// Find its config file
 	const fstarConfig = findConfigFile(e.document);
+	
+	// Construct the options for fstar.exe
 	const filePath = URI.parse(textDocument.uri);
 	const docDirectory = path.dirname(filePath.fsPath);
 	const filename = path.basename(filePath.fsPath);
-	console.log("onDidOpen(dir="+docDirectory+", file="+filename);
 	const options = ["--ide", filename];
 	fstarConfig.options.forEach((opt) => { options.push(opt); });
 	fstarConfig.include_dirs.forEach((dir) => { options.push("--include"); options.push(dir); });
+
 	console.log("Spawning fstar with options: " +options);
 	const fstar_ide =
 		cp.spawn(
 			fstarConfig.fstar_exe,
 			options,
 			{cwd:fstarConfig.cwd});
+
+	// Same options for the lax process, just add --lax
 	options.push("--lax");
 	const fstar_lax_ide =
 		cp.spawn(
 			fstarConfig.fstar_exe,
 			options,
 			{cwd:fstarConfig.cwd});
-	documentState.set(textDocument.uri, { 
+
+	// Initialize the document state for this doc
+	documentStates.set(textDocument.uri, { 
 						fstar_ide: fstar_ide,
 						fstar_lax_ide: fstar_lax_ide,
 						last_query_id: 0,
 						hover_symbol_info: new Map(),
 						hover_proofstate_info: new Map()
 					});
+
+	// Set the event handlers for the fstar processes
 	fstar_ide.stdin.setDefaultEncoding('utf-8');
-	fstar_ide.stdout.on('data', (data) => { handleFStarResponseForDocument(e.document, data); });
+	fstar_ide.stdout.on('data', (data) => { handleFStarResponseForDocument(e.document, data, false); });
 	fstar_ide.stderr.on('data', (data) => { console.log("fstar stderr: " +data); });
-	const vfs_add = {"query":"vfs-add","args":{"filename":null,"contents":textDocument.getText()}};
-	sendFullRequestForDocument(textDocument, vfs_add);
+	fstar_lax_ide.stdin.setDefaultEncoding('utf-8');
+	fstar_lax_ide.stdout.on('data', (data) => { handleFStarResponseForDocument(e.document, data, true); });
+	fstar_lax_ide.stderr.on('data', (data) => { console.log("fstar lax stderr: " +data); });
+	
+	// Send the initial dummy vfs-add request to the fstar processes
+	const vfs_add : VfsAdd = {"query":"vfs-add","args":{"filename":null,"contents":textDocument.getText()}};
+	sendRequestForDocument(textDocument, vfs_add);
+	sendRequestForDocument(textDocument, vfs_add, 'lax');
+	
+	// And ask the main fstar process to verify it
 	validateFStarDocument(textDocument, "full");
 
-	fstar_lax_ide.stdin.setDefaultEncoding('utf-8');
-	fstar_lax_ide.stdout.on('data', (data) => { handleLaxFStarResponseForDocument(e.document, data); });
-	fstar_lax_ide.stderr.on('data', (data) => { console.log("fstar lax stderr: " +data); });
-	sendLaxRequestForDocument(textDocument, vfs_add);
+	// The lax fstar will run in the background and will send us diagnostics as it goes	
 });
 
 // Only keep settings for open documents
 documents.onDidClose(e => {
-	documentSettings.delete(e.document.uri);
+	documentStates.delete(e.document.uri);
 });
 
 // The content of a text document has changed. This event is emitted
 // when the text document first opened or when its content has changed.
 documents.onDidChangeContent(change => {
-	laxValidateFStarDocument(change.document);
+	validateFStarDocument(change.document, "full", 'lax');
 	validateFStarDocument(change.document, "cache");
 });
 
 documents.onDidSave(change => {
 	validateFStarDocument(change.document, "full");
 });
-
-async function validateFStarDocument(textDocument: TextDocument, kind:'full'|'cache'): Promise<void> {
-	console.log("ValidateFStarDocument( " + textDocument.uri + ")");
-	connection.sendDiagnostics({uri:textDocument.uri, diagnostics:[]});
-	sendStatusClear({uri:textDocument.uri});
-	if (supportsFullBuffer) {
-		const push_context = { query:"full-buffer", args:{kind:kind, code:textDocument.getText(), line:0, column:0} };
-		sendFullRequestForDocument(textDocument, push_context);
-	}
-}
-
-async function laxValidateFStarDocument(textDocument: TextDocument): Promise<void> {
-	console.log("LaxValidateFStarDocument( " + textDocument.uri + ")");
-	connection.sendDiagnostics({uri:textDocument.uri, diagnostics:[]});
-	// sendStatusClear({uri:textDocument.uri});
-	if (supportsFullBuffer) {
-		const push_context = { query:"full-buffer", args:{kind:"full", code:textDocument.getText(), line:0, column:0} };
-		sendLaxRequestForDocument(textDocument, push_context);
-	}
-}
 
 connection.onDidChangeWatchedFiles(_change => {
 	// Monitored files have change in VSCode
@@ -613,104 +842,54 @@ connection.onCompletionResolve(
 	}
 );
 
-interface WordAndRange {
-	word: string;
-	range: FStarRange;
-}
-
-function findWordAtPosition(textDocument: TextDocument, position: Position) : WordAndRange
- {
-	const text = textDocument.getText();
-	const offset = textDocument.offsetAt(position);
-	let start = text.lastIndexOf(' ', offset) + 1;
-	for (let i = offset; i >= start; i--) {
-		if (text.at(i)?.search(/\W/) === 0) {
-			start = i + 1;
-			break;
-		}
-	}
-	const end = text.substring(offset).search(/\W/) + offset;
-	const word = text.substring(start, end > start ? end : undefined);
-	const range = Range.create(textDocument.positionAt(start), textDocument.positionAt(end));
-	return {word: word, range: rangeAsFStarRange(range)};
-}
-
-function findIdeSymbolAtPosition(textDocument: TextDocument, position: Position) {
-	const uri = textDocument.uri;
-	const doc_state = documentState.get(uri);
-	if (!doc_state) { return; }
-	const wordAndRange = findWordAtPosition(textDocument, position);
-	const range = wordAndRange.range;
-	const rangeKey = JSON.stringify(range);
-	console.log("Looking for symbol info at " + rangeKey);
-	const result = doc_state.hover_symbol_info.get(rangeKey);
-	return { symbolInfo: result, wordAndRange: wordAndRange };
-}
-
-function findIdeProofStateAtLine(textDocument: TextDocument, position: Position) {
-	const uri = textDocument.uri;
-	const doc_state = documentState.get(uri);
-	if (!doc_state) { return; }
-	const rangeKey = position.line + 1;
-	console.log("Looking for proof info at  " + rangeKey);
-	return doc_state.hover_proofstate_info.get(rangeKey);
-}
-
-function requestSymbolInfo(textDocument: TextDocument, position: Position, wordAndRange : WordAndRange) : void {
-	const uri = textDocument.uri;
-	const filePath = URI.parse(uri).fsPath;
-	const query = {
-		query:"lookup",
-		args: {
-			context:"code",
-			symbol:wordAndRange.word,
-			"requested-info":["type","documentation","defined-at"],
-			location:{
-				filename:filePath,
-				line:position.line+1,
-				column:position.character
-			},
-			"symbol-range" : wordAndRange.range
-		}
-	};
-	sendLaxRequestForDocument(textDocument, query);
-}
-
-function formatIdeSymbol(symbol:  IdeSymbol) : Hover {
-	return {
-			contents: {
-				kind:'markdown',
-				value:"```fstar\n" + symbol.name + ":\n" + symbol.type + "\n```\n"
-			}
-	};
-}
-
+// The onHover handler is called when the user hovers over a symbol
+// The interface requires us to return a Hover object *synchronously*
+// However, our communication with fstar.exe is asynchronous
+// So we ask F* to resolve the symbol asynchronously, and return a dummy Hover
+// object at first.
+// When F* responds, the symbol table map gets populated
+// Then, if we get a hover request for the same symbol, we can return the
+// actual Hover object.
+// Sometimes, the symbol table map gets populated before the hover request, 
+// notably in the case where we have tactic proof state information to display
+// for that line. In that case, we just return the Hover object immediately.
+//
+// Note: There are some problems with this, because as the document changes,
+// we should invalidate the symbol table map. But we don't do that yet.
+// I plan to adjust the F* IDE protocol so that it can send us a symbol table
+// map for every declaration that the lax F* process sees. We can use that table
+// to resolve symbols, but even that is problematic because the lax F* also caches
+// the AST of the document rather than the raw textual positions. So we'll have to
+// do some work to make this work well.
 connection.onHover(
 	(textDocumentPosition: TextDocumentPositionParams): Hover => {
-		console.log("Hover: " + textDocumentPosition.position.line + 
-					", " + textDocumentPosition.position.character+ 
-					" in " + textDocumentPosition.textDocument.uri);
 		const textDoc = documents.get(textDocumentPosition.textDocument.uri);
 		if (!textDoc) { return {contents: ""}; }
+		// First, check if we have proof state information for this line
 		const proofState = findIdeProofStateAtLine(textDoc, textDocumentPosition.position);
 		if (proofState) {
 			return {
 				contents: {
 					kind:'markdown',
-					value:"```fstar\n" + formatIdeProofState(proofState) + "\n```\n"
+					value:formatIdeProofState(proofState)
 				}
 			};
 		}
+		// Otherwise, check if we have symbol information for this symbol
 		const symbol = findIdeSymbolAtPosition(textDoc, textDocumentPosition.position);
 		if (!symbol) { return {contents: "No symbol info"}; }	
-		if (symbol && symbol.symbolInfo) { //} && result.symbol == hoverInfo.word) { 
+		if (symbol && symbol.symbolInfo) { 
 			return formatIdeSymbol(symbol.symbolInfo);
 		}
 		requestSymbolInfo(textDoc, textDocumentPosition.position, symbol.wordAndRange);
-		return {contents: {kind:'plaintext', value:"Loading hover at: " + symbol.wordAndRange.word}};
+		return {contents: {kind:'plaintext', value:"Looking up:" + symbol.wordAndRange.word}};
 	}
 );
 
+
+// The onDefinition handler is called when the user clicks on a symbol
+// It's very similar to the onHover handler, except that it returns a
+// LocationLink object instead of a Hover object
 connection.onDefinition((defParams : DefinitionParams) => {
 	const textDoc = documents.get(defParams.textDocument.uri);
 	if (!textDoc) { return []; }
@@ -720,7 +899,7 @@ connection.onDefinition((defParams : DefinitionParams) => {
 		const sym = symbol.symbolInfo;
 		const defined_at = sym["defined-at"];
 		if (!defined_at) { return []; }		
-		const range = rangeOfFStarRange(defined_at);
+		const range = fstarRangeAsRange(defined_at);
 		const uri = defined_at.fname == "<input>" ? textDoc.uri : pathToFileURL(defined_at.fname).toString();
 		const location = LocationLink.create(uri, range, range);
 		return [location];
