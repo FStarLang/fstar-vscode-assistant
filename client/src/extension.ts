@@ -45,6 +45,11 @@ interface StatusOkMessage {
 	ranges: vscode.Range [];
 }
 
+interface StatusFailedMessage {
+	uri: string;
+	ranges: vscode.Range [];
+}
+
 interface StatusClearMessage {
 	uri: string;
 }
@@ -78,7 +83,14 @@ function handleStatusOk (msg : StatusOkMessage)  {
 		currentDecorations.push(range);
 	});
 	gutterOkDecorationsMap.set(msg.uri, currentDecorations);
-	// clear background colors
+	// clear hourglasses
+	proofInProgressDecorationMap.set(msg.uri, []);
+	setActiveEditorDecorationsIfUriMatches(msg.uri);
+}
+
+// This function is called when the server decideds that a chunk has failed verification
+// Clear any hourglass decorations
+function handleStatusFailed (msg : StatusFailedMessage)  {
 	proofInProgressDecorationMap.set(msg.uri, []);
 	setActiveEditorDecorationsIfUriMatches(msg.uri);
 }
@@ -148,6 +160,7 @@ export function activate(context: ExtensionContext) {
 		client.onNotification('custom/statusOk', handleStatusOk);
 		client.onNotification('custom/statusClear', handleStatusClear);
 		client.onNotification('custom/statusStarted', handleStatusStarted);
+		client.onNotification('custom/statusFailed', handleStatusFailed);
 	});
 	vscode.window.onDidChangeActiveTextEditor(handleDidChangeActiveEditor);
 

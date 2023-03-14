@@ -21,7 +21,8 @@ import {
 	Definition,
 	DefinitionParams,
 	WorkspaceFolder,
-	LocationLink
+	LocationLink,
+	DocumentRangeFormattingParams
 } from 'vscode-languageserver/node';
 
 import {
@@ -321,10 +322,15 @@ interface StatusStartedMessage {
 // at the given ranges
 interface StatusOkMessage {
 	uri: string;
-	refresh: boolean; //Whether to display the refresh icon instead of the check mark
 	ranges: Range []; // A VSCode range, not an FStarRange
 }
 
+// A message to clear hourglass gutter icons for the document of the given URI
+// at the given ranges
+interface StatusFailedMessage {
+	uri: string;
+	ranges: Range []; // A VSCode range, not an FStarRange
+}
 ////////////////////////////////////////////////////////////////////////////////////
 // PATH and URI Utilities
 ////////////////////////////////////////////////////////////////////////////////////
@@ -493,6 +499,17 @@ function findIdeProofStateAtLine(textDocument: TextDocument, position: Position)
 	return doc_state.hover_proofstate_info.get(rangeKey);
 }
 
+function clearIdeProofProofStateAtRange(textDocument: TextDocument, range: FStarRange) {
+	const uri = textDocument.uri;
+	const doc_state = documentStates.get(uri);
+	if (!doc_state) { return; }
+	const line_ctr = range.beg[0];
+	const end_line_ctr = range.end[0];
+	for (let i = line_ctr; i <= end_line_ctr; i++) {
+		doc_state.hover_proofstate_info.delete(i);
+	}
+}
+
 ////////////////////////////////////////////////////////////////////////////////////
 // Range utilities
 ////////////////////////////////////////////////////////////////////////////////////
@@ -530,6 +547,9 @@ function sendStatusOk (msg : StatusOkMessage)  {
 	connection.sendNotification('custom/statusOk', msg);
 }
 
+function sendStatusFailed (msg : StatusFailedMessage)  {
+	connection.sendNotification('custom/statusFailed', msg);
+}
 
 function sendStatusClear (msg: StatusClearMessage) {
 	connection.sendNotification('custom/statusClear', msg);
@@ -625,14 +645,12 @@ function handleIdeProgress(textDocument: TextDocument, contents : IdeProgress) {
 		const ok_range = Range.create(mkPosition(rng.beg), mkPosition(rng.end));
 		const msg = {
 			uri: textDocument.uri,
-			refresh: false,
 			ranges: [ok_range]
 		};
 		sendStatusOk(msg);
 		return;
 	}
 	if (contents.stage == "full-buffer-fragment-started") {
-		console.log("Received full-bugger-fragment-started");
 		const rng = contents.ranges;
 		const ok_range = Range.create(mkPosition(rng.beg), mkPosition(rng.end));
 		const msg = {
@@ -640,6 +658,19 @@ function handleIdeProgress(textDocument: TextDocument, contents : IdeProgress) {
 			ranges: [ok_range]
 		};
 		sendStatusStarted(msg);
+		//If there's any proof state for the range that's starting
+		//clear it, because we'll get updates from fstar_ide
+		clearIdeProofProofStateAtRange(textDocument, rng);
+		return;
+	}
+	if (contents.stage == "full-buffer-fragment-failed") {
+		const rng = contents.ranges;
+		const ok_range = Range.create(mkPosition(rng.beg), mkPosition(rng.end));
+		const msg = {
+			uri: textDocument.uri,
+			ranges: [ok_range]
+		};
+		sendStatusFailed(msg);
 		return;
 	}
 }
@@ -689,6 +720,7 @@ let supportsFullBuffer = true;
 //   - hover
 //   - definitions
 //   - workspaces
+//   - reformatting
 connection.onInitialize((params: InitializeParams) => {
 	function initializeWorkspaceFolder(folder: WorkspaceFolder) {
 		const folderPath = URI.parse(folder.uri).fsPath;
@@ -738,7 +770,8 @@ connection.onInitialize((params: InitializeParams) => {
 				resolveProvider: true
 			},
 			hoverProvider: true,
-			definitionProvider: true
+			definitionProvider: true,
+			documentRangeFormattingProvider: true,
 		}
 	};
 	// Workspace folders: We use them for .fst.config.json files
@@ -936,6 +969,14 @@ connection.onDefinition((defParams : DefinitionParams) => {
 	requestSymbolInfo(textDoc, defParams.position, symbol.wordAndRange);
 	return [];
  });
+
+connection.onDocumentRangeFormatting((formatParams : DocumentRangeFormattingParams) => {
+	const textDoc = documents.get(formatParams.textDocument.uri);
+	if (!textDoc) { return []; }
+	const text = textDoc.getText(formatParams.range);
+	// call fstar.exe synchronously to format the text
+	return [];
+});
 
 // Make the text document manager listen on the connection
 // for open, change and close text document events
