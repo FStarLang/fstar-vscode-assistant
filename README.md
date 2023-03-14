@@ -21,6 +21,7 @@ https://github.com/artagnon/vsfstar
 * Hover for the type of a symbol under the cursor
 * Jump to definitions
 * Proof state dumps for tactic execution, hover on tactic line to see any dumps associated with that line
+* Format document and format selection
 
 ## Running it
 

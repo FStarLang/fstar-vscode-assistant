@@ -22,7 +22,8 @@ import {
 	DefinitionParams,
 	WorkspaceFolder,
 	LocationLink,
-	DocumentRangeFormattingParams
+	DocumentRangeFormattingParams,
+	TextEdit
 } from 'vscode-languageserver/node';
 
 import {
@@ -819,7 +820,6 @@ documents.onDidOpen( e => {
 	
 	// Construct the options for fstar.exe
 	const filePath = URI.parse(textDocument.uri);
-	const docDirectory = path.dirname(filePath.fsPath);
 	const filename = path.basename(filePath.fsPath);
 	const options = ["--ide", filename];
 	fstarConfig.options.forEach((opt) => { options.push(opt); });
@@ -975,7 +975,33 @@ connection.onDocumentRangeFormatting((formatParams : DocumentRangeFormattingPara
 	if (!textDoc) { return []; }
 	const text = textDoc.getText(formatParams.range);
 	// call fstar.exe synchronously to format the text
-	return [];
+	const fstarConfig = findConfigFile(textDoc);
+	const format_query = {
+		"query-id" : "1",
+		query : "format",
+		args : {
+			code: text
+		}
+	};
+	const fstarFormatter =
+		cp.spawnSync(fstarConfig.fstar_exe, 
+						["--ide", "prims.fst"], 
+						{input: JSON.stringify(format_query)});
+	const data = fstarFormatter.stdout.toString();
+	console.log("Formatter stdout: " + data);
+	// data.trim().split("\n").forEach(line => { console.log("Formatter stdout: " + line); });
+	// return [];
+	const replies = data.trim().split('\n').map(line => {  return JSON.parse(line); });
+	if (replies.length != 2 ||
+		replies[0].kind != "protocol-info" ||
+		replies[1].kind != "response" ||
+		!replies[1].response ||
+		replies[1].status != "success" ||
+		!replies[1].response["formatted-code"]) {
+		return [];
+	}
+	const formattedCode = replies[1].response["formatted-code"];
+	return [TextEdit.replace(formatParams.range, formattedCode)];
 });
 
 // Make the text document manager listen on the connection
