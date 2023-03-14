@@ -22,8 +22,22 @@ const gutterIconOk = vscode.window.createTextEditorDecorationType({
 	gutterIconPath: path.join(__filename, '..', '..', '..', 'resources',  'icons', 'check.svg')
 });
 
+// This is the hourglass icon that will be displayed in the gutter
+const gutterIconHourglass = vscode.window.createTextEditorDecorationType({
+	gutterIconSize: 'contain',
+	gutterIconPath: path.join(__filename, '..', '..', '..', 'resources',  'icons', 'hourglass.svg')
+});
+
 // A map from file URI to the gutter decorations positions for it
 const gutterOkDecorationsMap : Map<string, vscode.Range[]> = new Map<string, vscode.Range[]>();
+
+// A background color for text being verified: Not currently used
+const inProgressBackground = vscode.window.createTextEditorDecorationType({
+		backgroundColor: 'rgba(100, 0, 255, 0.5)'
+});
+
+// A map from file URI to the background color ranges for it
+const proofInProgressDecorationMap : Map<string, vscode.Range[]> = new Map<string, vscode.Range[]>();
 
 // Messags in the small protocol running on top of LSP between the server and client
 interface StatusOkMessage {
@@ -35,25 +49,51 @@ interface StatusClearMessage {
 	uri: string;
 }
 
+interface StatusStartedMessage {
+	uri: string;
+	ranges: vscode.Range [];
+}
+
+// This function is called when the active editor changes or when a status message is received
+// We set the gutter decorations for the document in the new active editor
+// if the URI matches the URI of the document in the new active editor
 function setActiveEditorDecorationsIfUriMatches(uri: string) {
 	const editor = vscode.window.activeTextEditor;
 	if (!editor) {	return; }
 	if (editor.document.uri.toString() === uri) {
 		const currentDecorations = gutterOkDecorationsMap.get(uri) ?? [];
 		editor.setDecorations(gutterIconOk, currentDecorations);
+		// editor.setDecorations(inProgressBackground, backgroundColorDecorationMap.get(uri) ?? []);
+		editor.setDecorations(gutterIconHourglass, proofInProgressDecorationMap.get(uri) ?? []);
 	}
 }
 
+// This function is called when the server sends a statusOk message
+// We add the ranges to the map of gutter decorations for the file
+// clearing any hourglass decorations
+// and set the decorations for the active editor if the URI matches
 function handleStatusOk (msg : StatusOkMessage)  {
-	console.log("Received statusOk notification: " +msg);
 	const currentDecorations : vscode.Range [] = gutterOkDecorationsMap.get(msg.uri) ?? [];
 	msg.ranges.forEach (range => {
 		currentDecorations.push(range);
 	});
 	gutterOkDecorationsMap.set(msg.uri, currentDecorations);
+	// clear background colors
+	proofInProgressDecorationMap.set(msg.uri, []);
 	setActiveEditorDecorationsIfUriMatches(msg.uri);
 }
 
+// This function is called when the server sends a statusStarted message
+// We record the ranges in the proofInProgressDecorationMap
+// and display the hourglass on those lines
+function handleStatusStarted (msg: StatusStartedMessage): void {
+	console.log("Received statusClear notification: " +msg);
+	proofInProgressDecorationMap.set(msg.uri, msg.ranges);
+	setActiveEditorDecorationsIfUriMatches(msg.uri);
+}
+
+// This function is called when the server sends a statusClear message
+// We clear the gutter decorations for the file
 function handleStatusClear (msg: StatusClearMessage): void {
 	console.log("Received statusClear notification: " +msg);
 	const currentDecorations : vscode.Range [] = gutterOkDecorationsMap.get(msg.uri) ?? [];
@@ -107,6 +147,7 @@ export function activate(context: ExtensionContext) {
 	client.onReady().then(() => {
 		client.onNotification('custom/statusOk', handleStatusOk);
 		client.onNotification('custom/statusClear', handleStatusClear);
+		client.onNotification('custom/statusStarted', handleStatusStarted);
 	});
 	vscode.window.onDidChangeActiveTextEditor(handleDidChangeActiveEditor);
 

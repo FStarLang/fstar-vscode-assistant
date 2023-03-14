@@ -11,6 +11,17 @@ https://github.com/microsoft/vscode-extension-samples/tree/main/lsp-sample
 The vsfstar extension was also a source of inspiration and initial guidance:
 https://github.com/artagnon/vsfstar
 
+## Features
+
+* Basic syntax highlighting
+* Incrementally checking the contents of a file, rechecking only the suffix of file that changed
+* Gutter status icons to show which parts of the file are proven and which are currently in progress
+* Diagnostic squigglies for errors and warnings 
+* Support for workspace folders and .fst.config.json files, to configure how F* is used through the editor for a project
+* Hover for the type of a symbol under the cursor
+* Jump to definitions
+* Proof state dumps for tactic execution, hover on tactic line to see any dumps associated with that line
+
 ## Running it
 
 - Run `npm install` in this folder. This installs all necessary npm

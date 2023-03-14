@@ -150,7 +150,7 @@ interface IdeError {
 }
 
 interface IdeProgress {
-	stage: 'full-buffer-fragment-ok';
+	stage: 'full-buffer-fragment-ok' | 'full-buffer-fragment-started';
 	ranges: FStarRange;
 }
 
@@ -311,10 +311,17 @@ interface StatusClearMessage {
 	uri: string;
 }
 
+// A message to set the background color of chunk that is being verified
+interface StatusStartedMessage {
+	uri: string;
+	ranges: Range []; // A VSCode range, not an FStarRange
+}
+
 // A message to dislay check-mark gutter icons for the document of the given URI
 // at the given ranges
 interface StatusOkMessage {
 	uri: string;
+	refresh: boolean; //Whether to display the refresh icon instead of the check mark
 	ranges: Range []; // A VSCode range, not an FStarRange
 }
 
@@ -515,6 +522,10 @@ function rangeAsFStarRange (rng: Range) : FStarRange {
 const connection = createConnection(ProposedFeatures.all);
 
 
+function sendStatusStarted (msg : StatusStartedMessage)  {
+	connection.sendNotification('custom/statusStarted', msg);
+}
+
 function sendStatusOk (msg : StatusOkMessage)  {
 	connection.sendNotification('custom/statusOk', msg);
 }
@@ -600,18 +611,36 @@ function handleIdeProofState (textDocument: TextDocument, response : IdeProofSta
 }
 
 // If a declaration in a full-buffer is verified, fstar_ide sends
-// us a full-buffer-fragment-ok message. We use that to send a status-ok
-// message to VSCode, which will clear the error squiggles for that range
-// and show a checkmark in the gutter for those locations
+// us first a  full-buffer-fragment-started message
+// We send a status-ok to the client which will 
+// and show an hourglass icon in the gutter for those locations
+// 
+// Then we may get a full-buffer-fragment-ok message.
+//
+// We use that to send a status-ok which will clear the hourglass icon
+// and show a checkmark in the gutter for the locations we send
 function handleIdeProgress(textDocument: TextDocument, contents : IdeProgress) {
-	if (contents.stage == "full-buffer-fragment-ok" ) {
+	if (contents.stage == "full-buffer-fragment-ok") {
+		const rng = contents.ranges;
+		const ok_range = Range.create(mkPosition(rng.beg), mkPosition(rng.end));
+		const msg = {
+			uri: textDocument.uri,
+			refresh: false,
+			ranges: [ok_range]
+		};
+		sendStatusOk(msg);
+		return;
+	}
+	if (contents.stage == "full-buffer-fragment-started") {
+		console.log("Received full-bugger-fragment-started");
 		const rng = contents.ranges;
 		const ok_range = Range.create(mkPosition(rng.beg), mkPosition(rng.end));
 		const msg = {
 			uri: textDocument.uri,
 			ranges: [ok_range]
 		};
-		sendStatusOk(msg);
+		sendStatusStarted(msg);
+		return;
 	}
 }
 
