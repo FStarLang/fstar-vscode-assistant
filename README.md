@@ -15,6 +15,7 @@ https://github.com/artagnon/vsfstar
 
 * Basic syntax highlighting
 * Incrementally checking the contents of a file, rechecking only the suffix of file that changed
+* Verify the file on open, on save, or with Ctrl+.
 * Gutter status icons to show which parts of the file are proven and which are currently in progress
 * Diagnostic squigglies for errors and warnings 
 * Support for workspace folders and .fst.config.json files, to configure how F* is used through the editor for a project
@@ -23,7 +24,13 @@ https://github.com/artagnon/vsfstar
 * Proof state dumps for tactic execution, hover on tactic line to see any dumps associated with that line
 * Format document and format selection
 
-## Running it
+## Installation
+
+An initial test release v0.0.1 is provided as a .vsix package in the Releases section. 
+
+In VSCode, click on extensions menu on the right, and then choose "Install from VSIX"
+
+## Running it in development mode
 
 - Run `npm install` in this folder. This installs all necessary npm
   modules in both the client and server folder
