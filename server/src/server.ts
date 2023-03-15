@@ -23,7 +23,7 @@ import {
 	WorkspaceFolder,
 	LocationLink,
 	DocumentRangeFormattingParams,
-	TextEdit
+	TextEdit,
 } from 'vscode-languageserver/node';
 
 import {
@@ -782,7 +782,7 @@ connection.onInitialize((params: InitializeParams) => {
 				supported: true
 			}
 		};
-	}
+	}		
 	return result;
 });
 
@@ -1002,6 +1002,13 @@ connection.onDocumentRangeFormatting((formatParams : DocumentRangeFormattingPara
 	}
 	const formattedCode = replies[1].response["formatted-code"];
 	return [TextEdit.replace(formatParams.range, formattedCode)];
+});
+
+connection.onRequest("fstar-extension/verify", (uri : any) => {
+	console.log("Received verify request with parameters: " + uri);
+	const textDocument = documents.get(uri);
+	if (!textDocument) { return; }
+	validateFStarDocument(textDocument, "full");
 });
 
 // Make the text document manager listen on the connection

@@ -4,7 +4,7 @@
  * ------------------------------------------------------------------------------------------ */
 
 import * as path from 'path';
-import { workspace, ExtensionContext } from 'vscode';
+import { workspace, ExtensionContext, Command } from 'vscode';
 import * as vscode from 'vscode';
 import {
 	LanguageClient,
@@ -163,6 +163,13 @@ export function activate(context: ExtensionContext) {
 		client.onNotification('custom/statusFailed', handleStatusFailed);
 	});
 	vscode.window.onDidChangeActiveTextEditor(handleDidChangeActiveEditor);
+
+	// register a command that is invoked when the extension is activated
+	const disposable = vscode.commands.registerTextEditorCommand('fstar-extension/verify', (textEditor, edit) => {
+		console.log('Client: Command <verify> executed with uri: ' + textEditor.document.uri);
+		client.sendRequest('fstar-extension/verify', textEditor.document.uri.toString());
+	});
+	context.subscriptions.push(disposable);
 
 	console.log("Activate called on " + context.asAbsolutePath("/"));
 	// Start the client. This will also launch the server

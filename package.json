@@ -54,7 +54,14 @@
 					"description": "Traces the communication between VS Code and the language server."
 				}
 			}
-		}
+		},
+		"keybindings": [
+			{
+			  "command": "fstar-extension/verify",
+			  "key": "ctrl+.",
+			  "when": "editorTextFocus"
+			}
+		]
 	},
 	"dependencies": {
 		"vscode-languageclient": "^7.0.0"
