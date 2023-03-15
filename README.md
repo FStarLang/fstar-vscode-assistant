@@ -30,6 +30,8 @@ An initial test release v0.0.1 is provided as a .vsix package in the Releases se
 
 In VSCode, click on extensions menu on the right, and then choose "Install from VSIX"
 
+You need to have fstar.exe in your path, built from the nik_fstar-vscode-assistant branch of F*
+
 ## Running it in development mode
 
 - Run `npm install` in this folder. This installs all necessary npm
