@@ -1,7 +1,7 @@
 {
-	"name": "lsp-sample-server",
-	"description": "Example implementation of a language server in node.",
-	"version": "1.0.0",
+	"name": "fstar-vscode-assistant-server",
+	"description": "Server side of fstar-vscode-assistant.",
+	"version": "0.0.1",
 	"author": "Microsoft Corporation",
 	"license": "MIT",
 	"engines": {
@@ -9,7 +9,7 @@
 	},
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/Microsoft/vscode-extension-samples"
+		"url": "https://github.com/FStarLang/fstar-vscode-assistant"
 	},
 	"dependencies": {
 		"vscode-languageserver": "^7.0.0",

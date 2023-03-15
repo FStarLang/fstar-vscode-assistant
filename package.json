@@ -1,14 +1,14 @@
 {
-	"name": "lsp-sample",
-	"description": "A language server example",
+	"name": "fstar-vscode-assistant",
+	"description": "An interactive editing mode for F*",
 	"author": "Microsoft Corporation",
 	"license": "MIT",
-	"version": "1.0.0",
+	"version": "0.0.1",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/Microsoft/vscode-extension-samples"
+		"url": "https://github.com/FStarLang/fstar-vscode-assistant"
 	},
-	"publisher": "vscode-samples",
+	"publisher": "Nikhil Swamy",
 	"categories": [],
 	"keywords": [
 		"multi-root ready"

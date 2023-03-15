@@ -1,13 +1,13 @@
 {
-	"name": "lsp-sample-client",
-	"description": "VSCode part of a language server",
+	"name": "fstar-vscode-assistant-client",
+	"description": "VSCode part of fstar-vscode-assistant",
 	"author": "Microsoft Corporation",
 	"license": "MIT",
 	"version": "0.0.1",
-	"publisher": "vscode",
+	"publisher": "Nikhil Swamy",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/Microsoft/vscode-extension-samples"
+		"url": "https://github.com/FStarLang/fstar-vscode-assistant"
 	},
 	"engines": {
 		"vscode": "^1.63.0"
