@@ -164,14 +164,23 @@ export function activate(context: ExtensionContext) {
 	});
 	vscode.window.onDidChangeActiveTextEditor(handleDidChangeActiveEditor);
 
-	// register a command that is invoked when the extension is activated
-	const disposable = vscode.commands.registerTextEditorCommand('fstar-extension/verify', (textEditor, edit) => {
+	// register a command for Ctrl+.
+	const verifyCommand = vscode.commands.registerTextEditorCommand('fstar-extension/verify', (textEditor, edit) => {
 		console.log('Client: Command <verify> executed with uri: ' + textEditor.document.uri);
 		client.sendRequest('fstar-extension/verify', textEditor.document.uri.toString());
 	});
-	context.subscriptions.push(disposable);
+	context.subscriptions.push(verifyCommand);
 
+	// register a command for Ctrl+;,Ctrl+.
+	const reloadAndVerifyCommand = vscode.commands.registerTextEditorCommand('fstar-extension/reload-deps-and-verify', (textEditor, edit) => {
+		console.log('Client: Command <reload-deps-and-verify> executed with uri: ' + textEditor.document.uri);
+		client.sendRequest('fstar-extension/reload-deps-and-verify', textEditor.document.uri.toString());
+	});
+	
 	console.log("Activate called on " + context.asAbsolutePath("/"));
+
+	// workspace.onDidChangeTextDocument((event) => { return;
+	// });
 	// Start the client. This will also launch the server
 	context.subscriptions.push(client.start());
 

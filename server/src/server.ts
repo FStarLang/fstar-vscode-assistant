@@ -205,7 +205,7 @@ interface VfsAdd {
 interface FullBufferQuery {
 	query: 'full-buffer';
 	args:{
-		kind:'full' | 'cache';
+		kind:'full' | 'cache' | 'reload-deps';
 		code:string;
 		line:number;
 		column:number
@@ -247,14 +247,14 @@ function sendRequestForDocument(textDocument : TextDocument, msg:any, lax?:'lax'
 		msg["query-id"] = '' + (qid + 1);
 		const text = JSON.stringify(msg);
 		const proc = lax ? doc_state.fstar_lax_ide : doc_state.fstar_ide;
-		// console.log("Sending message: " +text);
+		console.log(">>> " +text);
 		proc?.stdin?.write(text);
 		proc?.stdin?.write("\n");
 	}
 }
 
 // Sending a FullBufferQuery to fstar_ide or fstar_lax_ide
-function validateFStarDocument(textDocument: TextDocument, kind:'full'|'cache', lax?:'lax') {
+function validateFStarDocument(textDocument: TextDocument, kind:'full'|'cache'|'reload-deps', lax?:'lax') {
 	console.log("ValidateFStarDocument( " + textDocument.uri + ", " + kind + ", lax=" + lax + ")");
 	connection.sendDiagnostics({uri:textDocument.uri, diagnostics:[]});
 	if (!lax) {
@@ -569,9 +569,16 @@ function sendStatusClear (msg: StatusClearMessage) {
 
 // Main event dispatch for IDE responses
 function handleOneResponseForDocument(textDocument: TextDocument, data:string, lax: boolean) {
-	console.log("handleOneResponse " + (lax? "lax" : "") + ":" +data);
+	console.log("handleOneResponse " + (lax? "lax" : "") + ":<" +data+ ">");
 	if (data == "") { return; }
-	const r : IdeResponse = JSON.parse(data);
+	let r : IdeResponse;
+	try {
+		r = JSON.parse(data);
+	} 
+	catch (err) {
+		console.log("Error parsing response: " + err);
+		return;
+	}
 	if (r.kind == "protocol-info") {
 		return handleIdeProtocolInfo(textDocument, r as ProtocolInfo);
 	}
@@ -1009,6 +1016,16 @@ connection.onRequest("fstar-extension/verify", (uri : any) => {
 	const textDocument = documents.get(uri);
 	if (!textDocument) { return; }
 	validateFStarDocument(textDocument, "full");
+});
+
+connection.onRequest("fstar-extension/reload-deps-and-verify", (uri : any) => {
+	console.log("Received reload-deps-and-verify request with parameters: " + uri);
+	const textDocument = documents.get(uri);
+	if (!textDocument) { return; }
+	validateFStarDocument(textDocument, "reload-deps");
+	validateFStarDocument(textDocument, "full");
+	validateFStarDocument(textDocument, "reload-deps", "lax");
+	validateFStarDocument(textDocument, "full", "lax");
 });
 
 // Make the text document manager listen on the connection

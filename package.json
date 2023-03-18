@@ -60,7 +60,12 @@
 			  "command": "fstar-extension/verify",
 			  "key": "ctrl+.",
 			  "when": "editorTextFocus"
-			}
+			},
+			{
+				"command": "fstar-extension/reload-deps-and-verify",
+				"key": "ctrl+; ctrl+.",
+				"when": "editorTextFocus"
+			  }
 		]
 	},
 	"dependencies": {
