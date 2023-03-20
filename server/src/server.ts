@@ -57,6 +57,8 @@ interface IDEState {
 	hover_symbol_info: Map<string, IdeSymbol>;
 	// A proof-state table populated by fstar_ide when running tactics, displayed in onHover
 	hover_proofstate_info: Map<number, IdeProofState>;
+	// A flag to indicate if the prefix of the buffer is stale
+	prefix_stale : boolean;
 }
 
 const documentStates: Map<string, IDEState> = new Map();
@@ -151,9 +153,15 @@ interface IdeError {
 	ranges: FStarRange[];
 }
 
+interface IdeCodeFragment {
+	code: string;
+	range: FStarRange;
+}
+
 interface IdeProgress {
 	stage: 'full-buffer-fragment-ok' | 'full-buffer-fragment-started';
 	ranges: FStarRange;
+	"code-fragment"?: IdeCodeFragment
 }
 
 // A query response envelope
@@ -233,6 +241,16 @@ interface LookupQuery {
 	}
 }
 
+// A Cancel message is sent to fstar_ide when to document changes at a given range, to stop it
+// from verifying the part of the buffer that has changed
+interface CancelRequest {
+	query: 'cancel';
+	args: {
+		"cancel-line":number;
+		"cancel-column":number
+	}
+}
+
 // Some utilities to send messages to fstar_ide or fstar_lax_ide
 // Sending a request to either fstar_ide or fstar_lax_ide
 // Wraps the request with a fresh query-id
@@ -261,6 +279,10 @@ function validateFStarDocument(textDocument: TextDocument, kind:'full'|'cache'|'
 		// If this is non-lax requests, send a status clear messages to VSCode
 		// to clear the gutter icons and error squiggles
 		// They will be reported again if the document is not verified
+		const doc_state = documentStates.get(textDocument.uri);
+		if (doc_state) {
+			doc_state.prefix_stale = false;
+		}
 		sendStatusClear({uri:textDocument.uri});
 	}
 	if (supportsFullBuffer) {
@@ -648,8 +670,20 @@ function handleIdeProofState (textDocument: TextDocument, response : IdeProofSta
 // We use that to send a status-ok which will clear the hourglass icon
 // and show a checkmark in the gutter for the locations we send
 function handleIdeProgress(textDocument: TextDocument, contents : IdeProgress) {
+	const doc_state = documentStates.get(textDocument.uri);
+	if (!doc_state) { return; }
 	if (contents.stage == "full-buffer-fragment-ok") {
+		if (doc_state.prefix_stale) { return; }
 		const rng = contents.ranges;
+		if (!contents["code-fragment"]) { return; }
+		const code_fragment = contents["code-fragment"];
+		const currentText = textDocument.getText(fstarRangeAsRange(code_fragment.range));
+		const okText = code_fragment.code;
+		if (currentText.trim() != okText.trim()) { 
+			console.log("!!!!!!!!!!!!!!!!!!!!!Expected text: <\n" + okText + "\n> but got: <\n" + currentText + "\n>");
+			doc_state.prefix_stale = true;
+			return;
+		}
 		const ok_range = Range.create(mkPosition(rng.beg), mkPosition(rng.end));
 		const msg = {
 			uri: textDocument.uri,
@@ -853,7 +887,8 @@ documents.onDidOpen( e => {
 						fstar_lax_ide: fstar_lax_ide,
 						last_query_id: 0,
 						hover_symbol_info: new Map(),
-						hover_proofstate_info: new Map()
+						hover_proofstate_info: new Map(),
+						prefix_stale: false
 					});
 
 	// Set the event handlers for the fstar processes
@@ -1026,6 +1061,21 @@ connection.onRequest("fstar-extension/reload-deps-and-verify", (uri : any) => {
 	validateFStarDocument(textDocument, "full");
 	validateFStarDocument(textDocument, "reload-deps", "lax");
 	validateFStarDocument(textDocument, "full", "lax");
+});
+
+connection.onRequest("fstar-extension/text-doc-changed", (params : any) => {
+	const uri = params[0];
+	const range : { line:number ; character:number} [] = params[1];
+	const textDocument = documents.get(uri);
+	if (!textDocument) { return; }
+	const cancelRequest : CancelRequest = { 
+		query:"cancel",
+		args: { 
+			"cancel-line" : range[0].line + 1,
+			"cancel-column" : range[0].character
+		}
+	};
+	sendRequestForDocument(textDocument, cancelRequest);
 });
 
 // Make the text document manager listen on the connection

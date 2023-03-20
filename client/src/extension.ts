@@ -179,8 +179,29 @@ export function activate(context: ExtensionContext) {
 	
 	console.log("Activate called on " + context.asAbsolutePath("/"));
 
-	// workspace.onDidChangeTextDocument((event) => { return;
-	// });
+	workspace.onDidChangeTextDocument((event) => {
+		console.log("OnDidChangeTextDocument");
+		const textDoc = event.document;
+		let minRange : vscode.Range;
+		function compareRange (a : vscode.Range, b : vscode.Range) : number {
+			if (!a) { return -1; }
+			if (!b) { return 1; }
+			if (a.start.line < b.start.line) return -1;
+			if (a.start.line > b.start.line) return 1;
+			if (a.start.character < b.start.character) return -1;
+			if (a.start.character > b.start.character) return 1;
+			return 0;
+		}
+		event.contentChanges.forEach((change) => {
+			if (compareRange(minRange, change.range) < 0) {
+				minRange = change.range;
+			}
+		});
+		if (minRange) {
+			client.sendRequest('fstar-extension/text-doc-changed', [textDoc.uri.toString(), minRange]);
+		}
+	});
+
 	// Start the client. This will also launch the server
 	context.subscriptions.push(client.start());
 
