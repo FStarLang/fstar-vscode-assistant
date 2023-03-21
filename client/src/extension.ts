@@ -22,6 +22,12 @@ const gutterIconOk = vscode.window.createTextEditorDecorationType({
 	gutterIconPath: path.join(__filename, '..', '..', '..', 'resources',  'icons', 'check.svg')
 });
 
+// This is the check mark icon that will be displayed in the gutter
+const gutterIconLax = vscode.window.createTextEditorDecorationType({
+	gutterIconSize: 'contain',
+	gutterIconPath: path.join(__filename, '..', '..', '..', 'resources',  'icons', 'lax.svg')
+});
+
 // This is the hourglass icon that will be displayed in the gutter
 const gutterIconHourglass = vscode.window.createTextEditorDecorationType({
 	gutterIconSize: 'contain',
@@ -30,6 +36,9 @@ const gutterIconHourglass = vscode.window.createTextEditorDecorationType({
 
 // A map from file URI to the gutter decorations positions for it
 const gutterOkDecorationsMap : Map<string, vscode.Range[]> = new Map<string, vscode.Range[]>();
+
+// A map from file URI to the gutter decorations positions for it
+const gutterLaxDecorationsMap : Map<string, vscode.Range[]> = new Map<string, vscode.Range[]>();
 
 // A background color for text being verified: Not currently used
 const inProgressBackground = vscode.window.createTextEditorDecorationType({
@@ -42,6 +51,7 @@ const proofInProgressDecorationMap : Map<string, vscode.Range[]> = new Map<strin
 // Messags in the small protocol running on top of LSP between the server and client
 interface StatusOkMessage {
 	uri: string;
+	lax: boolean;
 	ranges: vscode.Range [];
 }
 
@@ -68,6 +78,7 @@ function setActiveEditorDecorationsIfUriMatches(uri: string) {
 	if (editor.document.uri.toString() === uri) {
 		const currentDecorations = gutterOkDecorationsMap.get(uri) ?? [];
 		editor.setDecorations(gutterIconOk, currentDecorations);
+		editor.setDecorations(gutterIconLax, gutterLaxDecorationsMap.get(uri) ?? []);
 		// editor.setDecorations(inProgressBackground, backgroundColorDecorationMap.get(uri) ?? []);
 		editor.setDecorations(gutterIconHourglass, proofInProgressDecorationMap.get(uri) ?? []);
 	}
@@ -78,11 +89,21 @@ function setActiveEditorDecorationsIfUriMatches(uri: string) {
 // clearing any hourglass decorations
 // and set the decorations for the active editor if the URI matches
 function handleStatusOk (msg : StatusOkMessage)  {
-	const currentDecorations : vscode.Range [] = gutterOkDecorationsMap.get(msg.uri) ?? [];
-	msg.ranges.forEach (range => {
-		currentDecorations.push(range);
-	});
-	gutterOkDecorationsMap.set(msg.uri, currentDecorations);
+	if (msg.lax) {
+		const currentDecorations : vscode.Range [] = gutterLaxDecorationsMap.get(msg.uri) ?? [];
+		msg.ranges.forEach (range => {
+			currentDecorations.push(range);
+		});
+		gutterLaxDecorationsMap.set(msg.uri, currentDecorations);
+	
+	}
+	else {
+		const currentDecorations : vscode.Range [] = gutterOkDecorationsMap.get(msg.uri) ?? [];
+		msg.ranges.forEach (range => {
+			currentDecorations.push(range);
+		});
+		gutterOkDecorationsMap.set(msg.uri, currentDecorations);
+	}
 	// clear hourglasses
 	proofInProgressDecorationMap.set(msg.uri, []);
 	setActiveEditorDecorationsIfUriMatches(msg.uri);
@@ -111,6 +132,9 @@ function handleStatusClear (msg: StatusClearMessage): void {
 	const currentDecorations : vscode.Range [] = gutterOkDecorationsMap.get(msg.uri) ?? [];
 	currentDecorations.length = 0;
 	gutterOkDecorationsMap.set(msg.uri, currentDecorations);
+	const currentLaxDecorations : vscode.Range [] = gutterLaxDecorationsMap.get(msg.uri) ?? [];
+	currentLaxDecorations.length = 0;
+	gutterLaxDecorationsMap.set(msg.uri, currentLaxDecorations);
 	setActiveEditorDecorationsIfUriMatches(msg.uri);
 }
 
@@ -118,8 +142,7 @@ function handleStatusClear (msg: StatusClearMessage): void {
 // We set the gutter decorations for the document in the new active editor
 function handleDidChangeActiveEditor(editor : vscode.TextEditor) {
 	console.log("Active editor changed to " + editor.document.uri.toString());
-	const currentDecorations = gutterOkDecorationsMap.get(editor.document.uri.toString()) ?? [];
-	editor.setDecorations(gutterIconOk, currentDecorations);
+	setActiveEditorDecorationsIfUriMatches(editor.document.uri.toString());
 }
 
 export function activate(context: ExtensionContext) {
@@ -165,9 +188,9 @@ export function activate(context: ExtensionContext) {
 	vscode.window.onDidChangeActiveTextEditor(handleDidChangeActiveEditor);
 
 	// register a command for Ctrl+.
-	const verifyCommand = vscode.commands.registerTextEditorCommand('fstar-extension/verify', (textEditor, edit) => {
-		console.log('Client: Command <verify> executed with uri: ' + textEditor.document.uri);
-		client.sendRequest('fstar-extension/verify', textEditor.document.uri.toString());
+	const verifyCommand = vscode.commands.registerTextEditorCommand('fstar-extension/verify-to-position', (textEditor, edit) => {
+		console.log('Client: Command <verify-to-position> executed with uri: ' + textEditor.document.uri + " at positon " + textEditor.selection.active.line + ", " + textEditor.selection.active.character);
+		client.sendRequest('fstar-extension/verify-to-position', [textEditor.document.uri.toString(), textEditor.selection.active]);
 	});
 	context.subscriptions.push(verifyCommand);
 
@@ -176,6 +199,13 @@ export function activate(context: ExtensionContext) {
 		console.log('Client: Command <reload-deps-and-verify> executed with uri: ' + textEditor.document.uri);
 		client.sendRequest('fstar-extension/reload-deps-and-verify', textEditor.document.uri.toString());
 	});
+
+	// register a command for Ctrl+Shift+.
+	const laxVerifyCommand = vscode.commands.registerTextEditorCommand('fstar-extension/lax-to-position', (textEditor, edit) => {
+		console.log('Client: Command <lax-to-position> executed with uri: ' + textEditor.document.uri + " at positon " + textEditor.selection.active.line + ", " + textEditor.selection.active.character);
+		client.sendRequest('fstar-extension/lax-to-position', [textEditor.document.uri.toString(), textEditor.selection.active]);
+	});
+	context.subscriptions.push(verifyCommand);
 	
 	console.log("Activate called on " + context.asAbsolutePath("/"));
 

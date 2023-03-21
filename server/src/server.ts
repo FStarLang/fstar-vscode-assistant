@@ -159,7 +159,7 @@ interface IdeCodeFragment {
 }
 
 interface IdeProgress {
-	stage: 'full-buffer-fragment-ok' | 'full-buffer-fragment-started';
+	stage: 'full-buffer-fragment-ok' | 'full-buffer-fragment-lax-ok' | 'full-buffer-fragment-started';
 	ranges: FStarRange;
 	"code-fragment"?: IdeCodeFragment
 }
@@ -213,10 +213,14 @@ interface VfsAdd {
 interface FullBufferQuery {
 	query: 'full-buffer';
 	args:{
-		kind:'full' | 'cache' | 'reload-deps';
+		kind:'full' | 'cache' | 'reload-deps' | 'verify-to-position' | 'lax-to-position';
 		code:string;
 		line:number;
 		column:number
+		"to-position" ?: {
+			line:number;
+			column:number
+		}
 	} 
 }
 
@@ -272,7 +276,7 @@ function sendRequestForDocument(textDocument : TextDocument, msg:any, lax?:'lax'
 }
 
 // Sending a FullBufferQuery to fstar_ide or fstar_lax_ide
-function validateFStarDocument(textDocument: TextDocument, kind:'full'|'cache'|'reload-deps', lax?:'lax') {
+function validateFStarDocument(textDocument: TextDocument,kind:'full'|'cache'|'reload-deps', lax?:'lax') {
 	console.log("ValidateFStarDocument( " + textDocument.uri + ", " + kind + ", lax=" + lax + ")");
 	connection.sendDiagnostics({uri:textDocument.uri, diagnostics:[]});
 	if (!lax) {
@@ -296,6 +300,32 @@ function validateFStarDocument(textDocument: TextDocument, kind:'full'|'cache'|'
 			}
 		};
 		sendRequestForDocument(textDocument, push_context, lax);
+	}
+}
+
+function validateFStarDocumentToPosition(textDocument: TextDocument,kind:'verify-to-position'|'lax-to-position', position:{line:number, column:number}) {
+	console.log("ValidateFStarDocumentToPosition( " + textDocument.uri + ", " + kind);
+	connection.sendDiagnostics({uri:textDocument.uri, diagnostics:[]});
+	// If this is non-lax requests, send a status clear messages to VSCode
+	// to clear the gutter icons and error squiggles
+	// They will be reported again if the document is not verified
+	const doc_state = documentStates.get(textDocument.uri);
+	if (doc_state) {
+		doc_state.prefix_stale = false;
+	}
+	sendStatusClear({uri:textDocument.uri});
+	if (supportsFullBuffer) {
+		const push_context : FullBufferQuery = { 
+			query:"full-buffer",
+			args:{
+				kind:kind,
+				code:textDocument.getText(),
+				line:0,
+				column:0,
+				"to-position":position
+			}
+		};
+		sendRequestForDocument(textDocument, push_context);
 	}
 }
 
@@ -345,6 +375,7 @@ interface StatusStartedMessage {
 // at the given ranges
 interface StatusOkMessage {
 	uri: string;
+	lax: boolean;
 	ranges: Range []; // A VSCode range, not an FStarRange
 }
 
@@ -672,7 +703,8 @@ function handleIdeProofState (textDocument: TextDocument, response : IdeProofSta
 function handleIdeProgress(textDocument: TextDocument, contents : IdeProgress) {
 	const doc_state = documentStates.get(textDocument.uri);
 	if (!doc_state) { return; }
-	if (contents.stage == "full-buffer-fragment-ok") {
+	if (contents.stage == "full-buffer-fragment-ok" ||
+		contents.stage == "full-buffer-fragment-lax-ok") {
 		if (doc_state.prefix_stale) { return; }
 		const rng = contents.ranges;
 		if (!contents["code-fragment"]) { return; }
@@ -687,9 +719,10 @@ function handleIdeProgress(textDocument: TextDocument, contents : IdeProgress) {
 		const ok_range = Range.create(mkPosition(rng.beg), mkPosition(rng.end));
 		const msg = {
 			uri: textDocument.uri,
+			lax: contents.stage == "full-buffer-fragment-lax-ok",
 			ranges: [ok_range]
 		};
-		sendStatusOk(msg);
+		sendStatusOk(msg);	
 		return;
 	}
 	if (contents.stage == "full-buffer-fragment-started") {
@@ -1046,11 +1079,22 @@ connection.onDocumentRangeFormatting((formatParams : DocumentRangeFormattingPara
 	return [TextEdit.replace(formatParams.range, formattedCode)];
 });
 
-connection.onRequest("fstar-extension/verify", (uri : any) => {
-	console.log("Received verify request with parameters: " + uri);
+connection.onRequest("fstar-extension/verify-to-position", (params : any) => {
+	const uri = params[0];
+	const position : { line: number, character: number } = params[1];
+	console.log("Received verify request with parameters: " + uri + " " + JSON.stringify(position));
 	const textDocument = documents.get(uri);
 	if (!textDocument) { return; }
-	validateFStarDocument(textDocument, "full");
+	validateFStarDocumentToPosition(textDocument, "verify-to-position", {line:position.line + 1, column:position.character});
+});
+
+connection.onRequest("fstar-extension/lax-to-position", (params : any) => {
+	const uri = params[0];
+	const position : { line: number, character: number } = params[1];
+	console.log("Received lax-to-position request with parameters: " + uri + " " + JSON.stringify(position));
+	const textDocument = documents.get(uri);
+	if (!textDocument) { return; }
+	validateFStarDocumentToPosition(textDocument, "lax-to-position", {line:position.line + 1, column:position.character});
 });
 
 connection.onRequest("fstar-extension/reload-deps-and-verify", (uri : any) => {

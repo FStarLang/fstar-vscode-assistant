@@ -57,7 +57,7 @@
 		},
 		"keybindings": [
 			{
-			  "command": "fstar-extension/verify",
+			  "command": "fstar-extension/verify-to-position",
 			  "key": "ctrl+.",
 			  "when": "editorTextFocus"
 			},
@@ -65,7 +65,12 @@
 				"command": "fstar-extension/reload-deps-and-verify",
 				"key": "ctrl+; ctrl+.",
 				"when": "editorTextFocus"
-			  }
+			},
+			{
+				"command": "fstar-extension/lax-to-position",
+				"key": "ctrl+shift+.",
+				"when": "editorTextFocus"
+			} 
 		]
 	},
 	"dependencies": {
