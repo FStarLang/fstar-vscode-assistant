@@ -44,6 +44,8 @@ There are three kinds of gutter icons:
 3. A question mark: This line was processed by F*, but the user instructed 
    F* to skip proving it (it was checked according to F*'s lax mode)
 
+** Basic Navigation ** 
+
 * Check file on opening: When a file is opened, F* attempts to check the
   entire contents of the file, stopping at the first error. You should see check marks
   in the gutter for the prefix of the file that was checked.
