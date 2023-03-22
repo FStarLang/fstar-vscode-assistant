@@ -23,7 +23,7 @@ import {
 	WorkspaceFolder,
 	LocationLink,
 	DocumentRangeFormattingParams,
-	TextEdit,
+	TextEdit
 } from 'vscode-languageserver/node';
 
 import {
@@ -57,6 +57,8 @@ interface IDEState {
 	hover_symbol_info: Map<string, IdeSymbol>;
 	// A proof-state table populated by fstar_ide when running tactics, displayed in onHover
 	hover_proofstate_info: Map<number, IdeProofState>;
+	// A table of auto-complete responses
+	auto_complete_info: Map<string, IdeAutoCompleteResponses>;
 	// A flag to indicate if the prefix of the buffer is stale
 	prefix_stale : boolean;
 }
@@ -164,17 +166,37 @@ interface IdeProgress {
 	"code-fragment"?: IdeCodeFragment
 }
 
+
+// An auto-complete response
+type IdeAutoCompleteResponse = [number, string, string];
+type IdeAutoCompleteResponses = IdeAutoCompleteResponse[];
+type IdeQueryResponseTypes = IdeSymbol | IdeError[] | IdeAutoCompleteResponses;
+
 // A query response envelope
 interface IdeQueryResponse {
 	'query-id': string;
 	kind: 'protocol-info' | 'response' | 'message';
 	status?: 'success' | 'failure';
 	level?: 'progress' | 'proof-state';
-	response?: IdeSymbol | IdeError[];
+	response?: IdeQueryResponseTypes;
 	contents?: IdeProofState | IdeSymbol | IdeProgress;
 }
 
 type IdeResponse = IdeQueryResponse | ProtocolInfo
+
+function decideIdeReponseType (response: IdeQueryResponseTypes) : 'symbol' | 'error' | 'auto-complete' {
+	if (Array.isArray(response)) {
+		if (response.length > 0 && Array.isArray(response[0])) {
+			return "auto-complete";
+		}
+		else {
+			return "error";
+		}
+	}
+	else {
+		return "symbol";
+	}
+}
 
 ////////////////////////////////////////////////////////////////////////////////////
 // Request messages in the IDE protocol that fstar.exe uses
@@ -255,6 +277,15 @@ interface CancelRequest {
 	}
 }
 
+// A request for autocompletion
+interface AutocompleteRequest {
+	query: 'autocomplete';
+	args: {
+		"partial-symbol":string;
+		context:'code'
+	}
+}
+
 // Some utilities to send messages to fstar_ide or fstar_lax_ide
 // Sending a request to either fstar_ide or fstar_lax_ide
 // Wraps the request with a fresh query-id
@@ -274,6 +305,7 @@ function sendRequestForDocument(textDocument : TextDocument, msg:any, lax?:'lax'
 		proc?.stdin?.write("\n");
 	}
 }
+
 
 // Sending a FullBufferQuery to fstar_ide or fstar_lax_ide
 function validateFStarDocument(textDocument: TextDocument,kind:'full'|'cache'|'reload-deps', lax?:'lax') {
@@ -525,8 +557,8 @@ function findWordAtPosition(textDocument: TextDocument, position: Position) : Wo
 			break;
 		}
 	}
-	const end = text.substring(offset).search(notIdentCharRegex) + offset;
-	const word = text.substring(start, end > start ? end : undefined);
+	const end = text.substring(offset).search(notIdentCharRegex);
+	const word = text.substring(start, end >= 0 ? end + offset : undefined);
 	const range = Range.create(textDocument.positionAt(start), textDocument.positionAt(end));
 	return {word: word, range: rangeAsFStarRange(range)};
 }
@@ -561,6 +593,26 @@ function clearIdeProofProofStateAtRange(textDocument: TextDocument, range: FStar
 	for (let i = line_ctr; i <= end_line_ctr; i++) {
 		doc_state.hover_proofstate_info.delete(i);
 	}
+}
+
+// Lookup any auto-complete information for the symbol under the cursor
+function findIdeAutoCompleteAtPosition(textDocument: TextDocument, position: Position) {
+	const uri = textDocument.uri;
+	const doc_state = documentStates.get(uri);
+	if (!doc_state) { return; }
+	const wordAndRange = findWordAtPosition(textDocument, position);
+	const auto_completions = [];
+	if (wordAndRange.word.length > 3) {
+		for (const [key, value] of doc_state.auto_complete_info) {
+			if (wordAndRange.word.startsWith(key)) {
+				auto_completions.push({key, value});
+			}
+		}
+	}
+	return {
+		auto_completions,
+		wordAndRange
+	};
 }
 
 ////////////////////////////////////////////////////////////////////////////////////
@@ -649,12 +701,15 @@ function handleOneResponseForDocument(textDocument: TextDocument, data:string, l
 	}
 	else if (r.kind == "response" && r.status == "success") { 
 		if (!r.response) { return; }
-		if (Array.isArray(r.response)) {
-			return handleIdeDiagnostics(textDocument, r.response as IdeError[]);
-		}
-		const sym = r.response as IdeSymbol;
-		if (sym.kind == "symbol") {
-			return handleIdeSymbol(textDocument, sym);
+		switch (decideIdeReponseType(r.response)) {
+			case 'symbol':
+				return handleIdeSymbol(textDocument, r.response as IdeSymbol);
+
+			case 'error':
+				return handleIdeDiagnostics(textDocument, r.response as IdeError[]);
+
+			case 'auto-complete':
+				return handleIdeAutoComplete(textDocument, r.response as IdeAutoCompleteResponses);
 		}
 	}
 	else {
@@ -777,6 +832,22 @@ function handleIdeDiagnostics (textDocument : TextDocument, response : IdeError 
 	}); 
 }
 
+function handleIdeAutoComplete(textDocument : TextDocument, response : IdeAutoCompleteResponses) {
+	if (!response || !(Array.isArray(response))) { return; }
+	const doc_state = documentStates.get(textDocument.uri);
+	if (!doc_state) { return; }
+	let searchTerm = undefined;
+	response.forEach((resp) => {
+		const annot = resp[1];
+		if (annot == "<search term>") {
+			searchTerm = resp[2];
+		}
+	});
+	if (!searchTerm) { return; }
+	doc_state.auto_complete_info.set(searchTerm, response);
+	return;
+}
+
 ////////////////////////////////////////////////////////////////////////////////////
 // Main event handlers for events triggered by the editor client
 ////////////////////////////////////////////////////////////////////////////////////
@@ -838,9 +909,6 @@ connection.onInitialize((params: InitializeParams) => {
 	const result: InitializeResult = {
 		capabilities: {
 			textDocumentSync: TextDocumentSyncKind.Incremental,
-			// Tell the client that this server supports code completion.
-			// This is left-over from the lsp-sample
-			// We should provide a completion provider, but we don't yet
 			completionProvider: {
 				resolveProvider: true
 			},
@@ -880,18 +948,10 @@ connection.onDidChangeConfiguration(change => {
 	return;
 });
 
-// The main entry point when a document is opened
-//  * find the .fst.config.json file for the document in the workspace, otherwise use a default config
-//  * spawn 2 fstar processes: one for typechecking, one lax process for fly-checking and symbol lookup
-//  * set event handlers to read the output of the fstar processes
-//  * send the current document to both processes to start typechecking
-documents.onDidOpen( e => {
-	// The document in the current editor
-	const textDocument = e.document;
-
+function refreshDocumentState(textDocument : TextDocument) {
 	// Find its config file
-	const fstarConfig = findConfigFile(e.document);
-	
+	const fstarConfig = findConfigFile(textDocument);
+
 	// Construct the options for fstar.exe
 	const filePath = URI.parse(textDocument.uri);
 	const filename = path.basename(filePath.fsPath);
@@ -921,36 +981,52 @@ documents.onDidOpen( e => {
 						last_query_id: 0,
 						hover_symbol_info: new Map(),
 						hover_proofstate_info: new Map(),
+						auto_complete_info: new Map(),
 						prefix_stale: false
 					});
 
 	// Set the event handlers for the fstar processes
 	fstar_ide.stdin.setDefaultEncoding('utf-8');
-	fstar_ide.stdout.on('data', (data) => { handleFStarResponseForDocument(e.document, data, false); });
+	fstar_ide.stdout.on('data', (data) => { handleFStarResponseForDocument(textDocument, data, false); });
 	fstar_ide.stderr.on('data', (data) => { console.log("fstar stderr: " +data); });
 	fstar_lax_ide.stdin.setDefaultEncoding('utf-8');
-	fstar_lax_ide.stdout.on('data', (data) => { handleFStarResponseForDocument(e.document, data, true); });
+	fstar_lax_ide.stdout.on('data', (data) => { handleFStarResponseForDocument(textDocument, data, true); });
 	fstar_lax_ide.stderr.on('data', (data) => { console.log("fstar lax stderr: " +data); });
 	
 	// Send the initial dummy vfs-add request to the fstar processes
 	const vfs_add : VfsAdd = {"query":"vfs-add","args":{"filename":null,"contents":textDocument.getText()}};
 	sendRequestForDocument(textDocument, vfs_add);
 	sendRequestForDocument(textDocument, vfs_add, 'lax');
-	
+}
+
+// The main entry point when a document is opened
+//  * find the .fst.config.json file for the document in the workspace, otherwise use a default config
+//  * spawn 2 fstar processes: one for typechecking, one lax process for fly-checking and symbol lookup
+//  * set event handlers to read the output of the fstar processes
+//  * send the current document to both processes to start typechecking
+documents.onDidOpen( e => {
+	// The document in the current editor
+	const textDocument = e.document;
+
+	refreshDocumentState(textDocument);
+
 	// And ask the main fstar process to verify it
 	validateFStarDocument(textDocument, "full");
 
 	// The lax fstar will run in the background and will send us diagnostics as it goes	
 });
 
-// Only keep settings for open documents
-documents.onDidClose(e => {
-	// Kill the fstar processes
-	const docState = documentStates.get(e.document.uri);
+function killFStarProcessesForDocument(textDocument : TextDocument) {
+	const docState = documentStates.get(textDocument.uri);
 	if (!docState) return;
 	docState.fstar_ide.kill();
 	docState.fstar_lax_ide.kill();
-	documentStates.delete(e.document.uri);
+	documentStates.delete(textDocument.uri);
+}
+
+// Only keep settings for open documents
+documents.onDidClose(e => {
+	killFStarProcessesForDocument(e.document);
 });
 
 // The content of a text document has changed. This event is emitted
@@ -969,10 +1045,61 @@ connection.onDidChangeWatchedFiles(_change => {
 	// connection.console.log('We received an file change event');
 });
 
-// This handler provides the initial list of the completion items.
+// The document state holds a table of completions for words in the document
+// This table is populated lazily by autocomplete calls to fstar_lax_ide 
+// We look in the table for a best match for the current word at the cursor
+// If we find a match, we return it
+// If the best match is not a perfect match (i.e., it doesn't match the word
+// at the cursor exactly), we send we send a request to fstar_lax_ide
+// for the current word, for use at subsequent completion calls
 connection.onCompletion(
-	(_textDocumentPosition: TextDocumentPositionParams): CompletionItem[] => {
-		return [];
+	(textDocumentPosition: TextDocumentPositionParams): CompletionItem[] => {
+		const doc = documents.get(textDocumentPosition.textDocument.uri);
+		if (!doc) { return []; }
+		// move the cursor back one character to get the word before the cursor
+		const position = Position.create(
+				textDocumentPosition.position.line,
+				textDocumentPosition.position.character - 1);
+		const autoCompleteResponses = findIdeAutoCompleteAtPosition(doc, position);
+		if (!autoCompleteResponses) {
+			return [];
+		}
+		let shouldSendRequest = false;
+		let bestMatch : {key:string; value:IdeAutoCompleteResponses} = { key: "", value: [] };
+		autoCompleteResponses.auto_completions.forEach((response) => {
+			if (response.key.length > bestMatch.key.length) {
+				bestMatch = response;
+			}
+		});
+		shouldSendRequest = bestMatch.key != autoCompleteResponses.wordAndRange.word;
+		if (shouldSendRequest) {
+			const wordAndRange = autoCompleteResponses.wordAndRange;
+			// Don't send requests for very short words
+			if (wordAndRange.word.length < 3) return [];
+			const autoCompletionRequest : AutocompleteRequest = {
+				"query": "autocomplete",
+				"args": {
+					"partial-symbol": wordAndRange.word,
+					"context": "code"
+				}
+			};
+			sendRequestForDocument(doc, autoCompletionRequest);
+		}
+		const items : CompletionItem[] = [];
+		bestMatch.value.forEach((response) => {
+			const data = response;
+			// vscode replaces the word at the cursor with the completion item
+			// but its notion of word is the suffix of the identifier after the last dot
+			// so the completion we provide is the suffix of the identifier after the last dot
+			const label = response[2].lastIndexOf('.') > 0 ? response[2].substring(response[2].lastIndexOf('.') + 1) : response[2];
+			const item : CompletionItem = {
+				label: label,
+				kind: CompletionItemKind.Text,
+				data: data
+			};
+			items.push(item);
+		});
+		return items;
 	}
 );
 
@@ -1102,12 +1229,14 @@ connection.onRequest("fstar-extension/lax-to-position", (params : any) => {
 	validateFStarDocumentToPosition(textDocument, "lax-to-position", {line:position.line + 1, column:position.character});
 });
 
-connection.onRequest("fstar-extension/reload-deps", (uri : any) => {
-	// console.log("Received reload-deps-and-verify request with parameters: " + uri);
+connection.onRequest("fstar-extension/restart", (uri : any) => {
+	// console.log("Received restart request with parameters: " + uri);
 	const textDocument = documents.get(uri);
 	if (!textDocument) { return; }
-	validateFStarDocument(textDocument, "reload-deps");
-	validateFStarDocument(textDocument, "reload-deps", "lax");
+	killFStarProcessesForDocument(textDocument);
+	refreshDocumentState(textDocument);
+	connection.sendDiagnostics({uri:textDocument.uri, diagnostics:[]});
+	sendStatusClear({uri:textDocument.uri});
 });
 
 connection.onRequest("fstar-extension/text-doc-changed", (params : any) => {

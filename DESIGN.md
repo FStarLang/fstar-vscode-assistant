@@ -93,7 +93,7 @@ its result as the reformatted content.
 
 ### onCompletion
 
-This event is not handled meaningfully yet.
+The `server.ts` sends an `autocomplete` IDE request to fstar_lax_ide.
 
 ## Custom events
 
@@ -111,12 +111,15 @@ The user can trigger this event by using `Ctrl+Shift+.`
 server.ts sends a request to `fstar_ide` to lax check the document up
 to the current cursor position.
 
-### `fstar-extension/reload-deps`
+### `fstar-extension/restart`
 
 The user can trigger this event by using `Ctrl+; Ctrl+.`
 
-server.ts sends a request to both `fstar_ide` and `fstar_lax_ide` to
-rewind its state to the top of the current document and reload any dependences.
+server.ts kills both the `fstar_ide` and `fstar_lax_ide` processes,
+clears any other document state, and then restarts the proceses.
+
+This is useful to rewind its state to the top of the current document
+and reload any dependences.
 
 ### `fstar-extension/text-doc-changed`
 

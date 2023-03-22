@@ -62,7 +62,7 @@
 			  "when": "editorTextFocus"
 			},
 			{
-				"command": "fstar-extension/reload-deps",
+				"command": "fstar-extension/restart",
 				"key": "ctrl+; ctrl+.",
 				"when": "editorTextFocus"
 			},

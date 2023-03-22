@@ -195,9 +195,9 @@ export function activate(context: ExtensionContext) {
 	context.subscriptions.push(verifyCommand);
 
 	// register a command for Ctrl+;,Ctrl+.
-	const reloadAndVerifyCommand = vscode.commands.registerTextEditorCommand('fstar-extension/reload-deps', (textEditor, edit) => {
-		// console.log('Client: Command <reload-deps-and-verify> executed with uri: ' + textEditor.document.uri);
-		client.sendRequest('fstar-extension/reload-deps', textEditor.document.uri.toString());
+	const reloadAndVerifyCommand = vscode.commands.registerTextEditorCommand('fstar-extension/restart', (textEditor, edit) => {
+		// console.log('Client: Command <restart> executed with uri: ' + textEditor.document.uri);
+		client.sendRequest('fstar-extension/restart', textEditor.document.uri.toString());
 	});
 	context.subscriptions.push(reloadAndVerifyCommand);
 

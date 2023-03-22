@@ -58,8 +58,9 @@ There are three kinds of gutter icons:
   This is useful if you want to quickly advance the checker past a chunk of document which
   might otherwise take a long time to check.
 
-* Reload dependence: The key-binding `Ctrl+; Ctrl+.` rewinds the checker to the top of the
-  document and reloads any dependences that may have changed.
+* Restart: The key-binding `Ctrl+; Ctrl+.` restarts the F* session for the current document,
+  rewindind the checker to the top of the document and rescanning it to load any dependences
+  that may have changed.
 
 * Check file on save: When the file is saved, the checker is advances in full checking mode
   to the end of the document. This is equivalent to doing `Ctrl+.` on the last line of the document.
@@ -94,6 +95,14 @@ You can also jump to the definition, using the menu option or by pressing F12.
 
 If you are using tactics, you can hover on tactic line to see the last proof state dumped at that line
 
+### Completions
+
+The extension will suggest auto-completions as you type, based on the symbol resolution in the
+current open namespaces in the document.
+
+Additionally, vscode provides default name completions based on heuristic syntactic matches
+for symbols in the current workspace.
+
 ### Format document and format selection
 
 You can select a fragment and use the menu option to ask F* to format it.
@@ -123,7 +132,6 @@ for launching `fstar.exe`. Here is a sample .fst.config.json file:
 
 This extensions does not yet support the following features, though support is expected soon.
 
-* Completions
 * Evaluating code snippets on F*'s reduction machinery
 * Types of sub-terms
 * Tactic proof state dumps when there is more than one dump associated with a line, e.g., in loops
