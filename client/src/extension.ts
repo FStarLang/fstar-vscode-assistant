@@ -120,7 +120,7 @@ function handleStatusFailed (msg : StatusFailedMessage)  {
 // We record the ranges in the proofInProgressDecorationMap
 // and display the hourglass on those lines
 function handleStatusStarted (msg: StatusStartedMessage): void {
-	console.log("Received statusClear notification: " +msg);
+	// console.log("Received statusClear notification: " +msg);
 	proofInProgressDecorationMap.set(msg.uri, msg.ranges);
 	setActiveEditorDecorationsIfUriMatches(msg.uri);
 }
@@ -128,7 +128,7 @@ function handleStatusStarted (msg: StatusStartedMessage): void {
 // This function is called when the server sends a statusClear message
 // We clear the gutter decorations for the file
 function handleStatusClear (msg: StatusClearMessage): void {
-	console.log("Received statusClear notification: " +msg);
+	// console.log("Received statusClear notification: " +msg);
 	const currentDecorations : vscode.Range [] = gutterOkDecorationsMap.get(msg.uri) ?? [];
 	currentDecorations.length = 0;
 	gutterOkDecorationsMap.set(msg.uri, currentDecorations);
@@ -141,7 +141,7 @@ function handleStatusClear (msg: StatusClearMessage): void {
 // A client-only handler for a active editor changed raised by the editor
 // We set the gutter decorations for the document in the new active editor
 function handleDidChangeActiveEditor(editor : vscode.TextEditor) {
-	console.log("Active editor changed to " + editor.document.uri.toString());
+	// console.log("Active editor changed to " + editor.document.uri.toString());
 	setActiveEditorDecorationsIfUriMatches(editor.document.uri.toString());
 }
 
@@ -189,28 +189,29 @@ export function activate(context: ExtensionContext) {
 
 	// register a command for Ctrl+.
 	const verifyCommand = vscode.commands.registerTextEditorCommand('fstar-extension/verify-to-position', (textEditor, edit) => {
-		console.log('Client: Command <verify-to-position> executed with uri: ' + textEditor.document.uri + " at positon " + textEditor.selection.active.line + ", " + textEditor.selection.active.character);
+		// console.log('Client: Command <verify-to-position> executed with uri: ' + textEditor.document.uri + " at positon " + textEditor.selection.active.line + ", " + textEditor.selection.active.character);
 		client.sendRequest('fstar-extension/verify-to-position', [textEditor.document.uri.toString(), textEditor.selection.active]);
 	});
 	context.subscriptions.push(verifyCommand);
 
 	// register a command for Ctrl+;,Ctrl+.
-	const reloadAndVerifyCommand = vscode.commands.registerTextEditorCommand('fstar-extension/reload-deps-and-verify', (textEditor, edit) => {
-		console.log('Client: Command <reload-deps-and-verify> executed with uri: ' + textEditor.document.uri);
-		client.sendRequest('fstar-extension/reload-deps-and-verify', textEditor.document.uri.toString());
+	const reloadAndVerifyCommand = vscode.commands.registerTextEditorCommand('fstar-extension/reload-deps', (textEditor, edit) => {
+		// console.log('Client: Command <reload-deps-and-verify> executed with uri: ' + textEditor.document.uri);
+		client.sendRequest('fstar-extension/reload-deps', textEditor.document.uri.toString());
 	});
+	context.subscriptions.push(reloadAndVerifyCommand);
 
 	// register a command for Ctrl+Shift+.
 	const laxVerifyCommand = vscode.commands.registerTextEditorCommand('fstar-extension/lax-to-position', (textEditor, edit) => {
-		console.log('Client: Command <lax-to-position> executed with uri: ' + textEditor.document.uri + " at positon " + textEditor.selection.active.line + ", " + textEditor.selection.active.character);
+		// console.log('Client: Command <lax-to-position> executed with uri: ' + textEditor.document.uri + " at positon " + textEditor.selection.active.line + ", " + textEditor.selection.active.character);
 		client.sendRequest('fstar-extension/lax-to-position', [textEditor.document.uri.toString(), textEditor.selection.active]);
 	});
 	context.subscriptions.push(verifyCommand);
 	
-	console.log("Activate called on " + context.asAbsolutePath("/"));
+	// console.log("Activate called on " + context.asAbsolutePath("/"));
 
 	workspace.onDidChangeTextDocument((event) => {
-		console.log("OnDidChangeTextDocument");
+		// console.log("OnDidChangeTextDocument");
 		const textDoc = event.document;
 		let minRange : vscode.Range;
 		function compareRange (a : vscode.Range, b : vscode.Range) : number {

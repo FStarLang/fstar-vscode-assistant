@@ -277,7 +277,7 @@ function sendRequestForDocument(textDocument : TextDocument, msg:any, lax?:'lax'
 
 // Sending a FullBufferQuery to fstar_ide or fstar_lax_ide
 function validateFStarDocument(textDocument: TextDocument,kind:'full'|'cache'|'reload-deps', lax?:'lax') {
-	console.log("ValidateFStarDocument( " + textDocument.uri + ", " + kind + ", lax=" + lax + ")");
+	// console.log("ValidateFStarDocument( " + textDocument.uri + ", " + kind + ", lax=" + lax + ")");
 	connection.sendDiagnostics({uri:textDocument.uri, diagnostics:[]});
 	if (!lax) {
 		// If this is non-lax requests, send a status clear messages to VSCode
@@ -304,7 +304,7 @@ function validateFStarDocument(textDocument: TextDocument,kind:'full'|'cache'|'r
 }
 
 function validateFStarDocumentToPosition(textDocument: TextDocument,kind:'verify-to-position'|'lax-to-position', position:{line:number, column:number}) {
-	console.log("ValidateFStarDocumentToPosition( " + textDocument.uri + ", " + kind);
+	// console.log("ValidateFStarDocumentToPosition( " + textDocument.uri + ", " + kind);
 	connection.sendDiagnostics({uri:textDocument.uri, diagnostics:[]});
 	// If this is non-lax requests, send a status clear messages to VSCode
 	// to clear the gutter icons and error squiggles
@@ -401,7 +401,7 @@ function checkFileInDirectory(dirPath : string, filePath :string) : boolean {
 
 	// Get the relative path from dirPath to filePath using path.relative()
 	const relativePath = path.relative(dirPath, filePath);
-	console.log("Relative path of " + filePath + " from " + dirPath + " is " + relativePath);
+	// console.log("Relative path of " + filePath + " from " + dirPath + " is " + relativePath);
 	// Check if relativePath starts with '..' or '.'
 	if (relativePath.startsWith('..')) {
 		// If yes, then filePath is outside dirPath
@@ -426,9 +426,9 @@ function findFilesByExtension(folderPath:string, extension:string) {
 	}
 	// Loop over the files
 	for (const file of files) {
-		console.log("Checking file " + file + " for extension " + extension);
+		// console.log("Checking file " + file + " for extension " + extension);
 		if (file.endsWith(extension)) {
-			console.log("Found config file " + file);
+			// console.log("Found config file " + file);
 			// absolute path of file is folderPath + file
 			matches.push(path.join(folderPath, file));
 		}
@@ -448,13 +448,13 @@ function findConfigFile(e : TextDocument) : FStarConfig {
 	};
 	workspaceFolders.find((folder) => {
 		const folderPath = URI.parse(folder.uri).fsPath;
-		console.log("Checking folder: " +folderPath+  " for file: " +filePath);
+		// console.log("Checking folder: " +folderPath+  " for file: " +filePath);
 		if (checkFileInDirectory(folderPath, filePath)) {
 			const r = workspaceConfigs.get(folderPath);	
 			if (r) {
 				result = r[0];
 			}
-			console.log("Found config: " +JSON.stringify(result));
+			// console.log("Found config: " +JSON.stringify(result));
 		}
 	});
 	return result;
@@ -518,13 +518,14 @@ function findWordAtPosition(textDocument: TextDocument, position: Position) : Wo
 	const text = textDocument.getText();
 	const offset = textDocument.offsetAt(position);
 	let start = text.lastIndexOf(' ', offset) + 1;
+	const notIdentCharRegex = /[^a-zA-Z_.'0-9]/;
 	for (let i = offset; i >= start; i--) {
-		if (text.at(i)?.search(/\W/) === 0) {
+		if (text.at(i)?.search(notIdentCharRegex) === 0) {
 			start = i + 1;
 			break;
 		}
 	}
-	const end = text.substring(offset).search(/\W/) + offset;
+	const end = text.substring(offset).search(notIdentCharRegex) + offset;
 	const word = text.substring(start, end > start ? end : undefined);
 	const range = Range.create(textDocument.positionAt(start), textDocument.positionAt(end));
 	return {word: word, range: rangeAsFStarRange(range)};
@@ -538,7 +539,6 @@ function findIdeSymbolAtPosition(textDocument: TextDocument, position: Position)
 	const wordAndRange = findWordAtPosition(textDocument, position);
 	const range = wordAndRange.range;
 	const rangeKey = JSON.stringify(range);
-	console.log("Looking for symbol info at " + rangeKey);
 	const result = doc_state.hover_symbol_info.get(rangeKey);
 	return { symbolInfo: result, wordAndRange: wordAndRange };
 }
@@ -549,7 +549,6 @@ function findIdeProofStateAtLine(textDocument: TextDocument, position: Position)
 	const doc_state = documentStates.get(uri);
 	if (!doc_state) { return; }
 	const rangeKey = position.line + 1;
-	console.log("Looking for proof info at  " + rangeKey);
 	return doc_state.hover_proofstate_info.get(rangeKey);
 }
 
@@ -616,13 +615,14 @@ function sendStatusClear (msg: StatusClearMessage) {
 
  // Event handler for stdout on fstar_ide
  function handleFStarResponseForDocument(textDocument: TextDocument, data:string, lax:boolean) {
+	console.log("<<< " + (lax? "lax" : "") + "uri:<" +textDocument.uri + ">:" +data);
 	const lines = data.toString().split('\n');
 	lines.forEach(line => { handleOneResponseForDocument(textDocument, line, lax);  });
 }
 
 // Main event dispatch for IDE responses
 function handleOneResponseForDocument(textDocument: TextDocument, data:string, lax: boolean) {
-	console.log("handleOneResponse " + (lax? "lax" : "") + ":<" +data+ ">");
+	// console.log("handleOneResponse " + (lax? "lax" : "") + ":<" +data+ ">");
 	if (data == "") { return; }
 	let r : IdeResponse;
 	try {
@@ -672,7 +672,7 @@ function handleOneResponseForDocument(textDocument: TextDocument, data:string, l
 
 // If we get a response to a symbol query, we store it in the symbol table map
 function handleIdeSymbol(textDocument: TextDocument, response : IdeSymbol) {
-	console.log("Got ide symbol " +JSON.stringify(response));
+	// console.log("Got ide symbol " +JSON.stringify(response));
 	const rng = JSON.stringify(response["symbol-range"]);
 	const hoverSymbolMap = documentStates.get(textDocument.uri)?.hover_symbol_info;
 	if (hoverSymbolMap) {
@@ -682,11 +682,11 @@ function handleIdeSymbol(textDocument: TextDocument, response : IdeSymbol) {
 
 // If we get a proof state dump message, we store it in the proof state map
 function handleIdeProofState (textDocument: TextDocument, response : IdeProofState) {
-	console.log("Got ide proof state " + JSON.stringify(response));
+	// console.log("Got ide proof state " + JSON.stringify(response));
 	const range_key = response.location.beg[0];
 	const hoverProofStateMap = documentStates.get(textDocument.uri)?.hover_proofstate_info;
 	if (hoverProofStateMap) {
-		console.log("Setting proof state hover info at line: " +range_key);
+		// console.log("Setting proof state hover info at line: " +range_key);
 		hoverProofStateMap.set(range_key, response);
 	}
 }
@@ -712,7 +712,7 @@ function handleIdeProgress(textDocument: TextDocument, contents : IdeProgress) {
 		const currentText = textDocument.getText(fstarRangeAsRange(code_fragment.range));
 		const okText = code_fragment.code;
 		if (currentText.trim() != okText.trim()) { 
-			console.log("!!!!!!!!!!!!!!!!!!!!!Expected text: <\n" + okText + "\n> but got: <\n" + currentText + "\n>");
+			// console.log("!!!!!!!!!!!!!!!!!!!!!Expected text: <\n" + okText + "\n> but got: <\n" + currentText + "\n>");
 			doc_state.prefix_stale = true;
 			return;
 		}
@@ -801,7 +801,7 @@ connection.onInitialize((params: InitializeParams) => {
 		const folderPath = URI.parse(folder.uri).fsPath;
 		const folderConfigs : FStarConfig[] = [];
 		findFilesByExtension(folderPath, ".fst.config.json").forEach(configFile => {
-			console.log("Found config file " + configFile);
+			// console.log("Found config file " + configFile);
 			const contents = fs.readFileSync(configFile, 'utf8');
 			const config = JSON.parse(contents);
 			if (!config.cwd) {
@@ -961,7 +961,7 @@ documents.onDidSave(change => {
 
 connection.onDidChangeWatchedFiles(_change => {
 	// Monitored files have change in VSCode
-	connection.console.log('We received an file change event');
+	// connection.console.log('We received an file change event');
 });
 
 // This handler provides the initial list of the completion items.
@@ -1063,7 +1063,7 @@ connection.onDocumentRangeFormatting((formatParams : DocumentRangeFormattingPara
 						["--ide", "prims.fst"], 
 						{input: JSON.stringify(format_query)});
 	const data = fstarFormatter.stdout.toString();
-	console.log("Formatter stdout: " + data);
+	// console.log("Formatter stdout: " + data);
 	// data.trim().split("\n").forEach(line => { console.log("Formatter stdout: " + line); });
 	// return [];
 	const replies = data.trim().split('\n').map(line => {  return JSON.parse(line); });
@@ -1082,7 +1082,7 @@ connection.onDocumentRangeFormatting((formatParams : DocumentRangeFormattingPara
 connection.onRequest("fstar-extension/verify-to-position", (params : any) => {
 	const uri = params[0];
 	const position : { line: number, character: number } = params[1];
-	console.log("Received verify request with parameters: " + uri + " " + JSON.stringify(position));
+	// console.log("Received verify request with parameters: " + uri + " " + JSON.stringify(position));
 	const textDocument = documents.get(uri);
 	if (!textDocument) { return; }
 	validateFStarDocumentToPosition(textDocument, "verify-to-position", {line:position.line + 1, column:position.character});
@@ -1091,20 +1091,18 @@ connection.onRequest("fstar-extension/verify-to-position", (params : any) => {
 connection.onRequest("fstar-extension/lax-to-position", (params : any) => {
 	const uri = params[0];
 	const position : { line: number, character: number } = params[1];
-	console.log("Received lax-to-position request with parameters: " + uri + " " + JSON.stringify(position));
+	// console.log("Received lax-to-position request with parameters: " + uri + " " + JSON.stringify(position));
 	const textDocument = documents.get(uri);
 	if (!textDocument) { return; }
 	validateFStarDocumentToPosition(textDocument, "lax-to-position", {line:position.line + 1, column:position.character});
 });
 
-connection.onRequest("fstar-extension/reload-deps-and-verify", (uri : any) => {
-	console.log("Received reload-deps-and-verify request with parameters: " + uri);
+connection.onRequest("fstar-extension/reload-deps", (uri : any) => {
+	// console.log("Received reload-deps-and-verify request with parameters: " + uri);
 	const textDocument = documents.get(uri);
 	if (!textDocument) { return; }
 	validateFStarDocument(textDocument, "reload-deps");
-	validateFStarDocument(textDocument, "full");
 	validateFStarDocument(textDocument, "reload-deps", "lax");
-	validateFStarDocument(textDocument, "full", "lax");
 });
 
 connection.onRequest("fstar-extension/text-doc-changed", (params : any) => {
