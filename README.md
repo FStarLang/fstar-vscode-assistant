@@ -64,6 +64,17 @@ There are three kinds of gutter icons:
 * Check file on save: When the file is saved, the checker is advances in full checking mode
   to the end of the document. This is equivalent to doing `Ctrl+.` on the last line of the document.
 
+Note, although checking the document proceeds in a linear, top-down fashion, at no point is any
+fragment of the document locked. You can keep editing a document while F* is checking some prefix 
+of it.
+
+### Flycheck
+
+In addition to checking the document as described above, this extension uses a second, completely
+independent F* process to lax-check the changed part of document at each keystroke. 
+
+This should give you feedback on basic type errors as you type.
+
 ### Diagnostic squigglies for errors and warnings
 
 Any errors or warnings reported by the checker appear in the Problems pane and are also
@@ -116,6 +127,18 @@ This extensions does not yet support the following features, though support is e
 * Evaluating code snippets on F*'s reduction machinery
 * Types of sub-terms
 * Tactic proof state dumps when there is more than one dump associated with a line, e.g., in loops
+* Allowing the user to terminate a long-running Z3 process by sending it a signal
+
+## Limitations
+
+This extension does not yet support various themes, e.g., it does not provide different
+icons for use in light mode vs. dark mode.
+
+Also, a disclaimer: This is my first non-trivial VSCode extension and I may well not be following
+conventions that extension users may expect. Any contributions or suggestions to bring it more in
+line with existing conventions are most welcome.
+
+Also, I have been using this extension myself for the past couple of weeks, while developing it. 
 
 ## Running it in development mode
 
