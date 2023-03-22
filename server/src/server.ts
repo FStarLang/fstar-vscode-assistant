@@ -593,19 +593,19 @@ const connection = createConnection(ProposedFeatures.all);
 
 
 function sendStatusStarted (msg : StatusStartedMessage)  {
-	connection.sendNotification('custom/statusStarted', msg);
+	connection.sendNotification('fstar-extension/statusStarted', msg);
 }
 
 function sendStatusOk (msg : StatusOkMessage)  {
-	connection.sendNotification('custom/statusOk', msg);
+	connection.sendNotification('fstar-extension/statusOk', msg);
 }
 
 function sendStatusFailed (msg : StatusFailedMessage)  {
-	connection.sendNotification('custom/statusFailed', msg);
+	connection.sendNotification('fstar-extension/statusFailed', msg);
 }
 
 function sendStatusClear (msg: StatusClearMessage) {
-	connection.sendNotification('custom/statusClear', msg);
+	connection.sendNotification('fstar-extension/statusClear', msg);
 }
 
 
@@ -945,6 +945,11 @@ documents.onDidOpen( e => {
 
 // Only keep settings for open documents
 documents.onDidClose(e => {
+	// Kill the fstar processes
+	const docState = documentStates.get(e.document.uri);
+	if (!docState) return;
+	docState.fstar_ide.kill();
+	docState.fstar_lax_ide.kill();
 	documentStates.delete(e.document.uri);
 });
 

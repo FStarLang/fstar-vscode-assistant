@@ -180,10 +180,10 @@ export function activate(context: ExtensionContext) {
 	);
 	
 	client.onReady().then(() => {
-		client.onNotification('custom/statusOk', handleStatusOk);
-		client.onNotification('custom/statusClear', handleStatusClear);
-		client.onNotification('custom/statusStarted', handleStatusStarted);
-		client.onNotification('custom/statusFailed', handleStatusFailed);
+		client.onNotification('fstar-extension/statusOk', handleStatusOk);
+		client.onNotification('fstar-extension/statusClear', handleStatusClear);
+		client.onNotification('fstar-extension/statusStarted', handleStatusStarted);
+		client.onNotification('fstar-extension/statusFailed', handleStatusFailed);
 	});
 	vscode.window.onDidChangeActiveTextEditor(handleDidChangeActiveEditor);
 
