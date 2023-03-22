@@ -4,7 +4,7 @@ The diagram below presents a high-level overview of the design of this extension
 
 ```
                                 Client                           Server                       F* processes
-					   vscode-languageclient/node        vscode-languageserver/node             Native F*
+                       vscode-languageclient/node        vscode-languageserver/node             Native F*
                                                                                               ___________
   .---------.  events      .---------------.               .---------------.                 |_fstar.exe_|_   
   | editor  | -----------> |  extension.ts | -----LSP--->  |   server.ts   | ---fstar-ide--->  |_fstar.exe_|_         
