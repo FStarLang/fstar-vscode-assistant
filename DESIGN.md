@@ -52,7 +52,7 @@ and sets up its state.
 * `const documentStates: Map<string, IDEState>`: A map from the URI of each open document
    to the IDE state for it.
 
-* `const workspaceConfigs: Map<string, FStarConfig []>`: A parsed .fst.config.json file, if any,
+* `const workspaceConfigs: Map<string, FStarConfig>`: A parsed .fst.config.json file, if any,
    for all open workspace folders.
 
 

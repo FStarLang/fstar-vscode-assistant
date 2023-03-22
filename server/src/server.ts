@@ -81,7 +81,7 @@ interface FStarConfig {
 let workspaceFolders : WorkspaceFolder [] = [];
 
 // Config files in the workspace root folders
-const workspaceConfigs: Map<string, FStarConfig []> = new Map();
+const workspaceConfigs: Map<string, FStarConfig> = new Map();
 
 ////////////////////////////////////////////////////////////////////////////////////
 // Response messages in the IDE protocol that fstar.exe uses
@@ -484,7 +484,7 @@ function findConfigFile(e : TextDocument) : FStarConfig {
 		if (checkFileInDirectory(folderPath, filePath)) {
 			const r = workspaceConfigs.get(folderPath);	
 			if (r) {
-				result = r[0];
+				result = r;
 			}
 			// console.log("Found config: " +JSON.stringify(result));
 		}
@@ -870,23 +870,29 @@ let supportsFullBuffer = true;
 connection.onInitialize((params: InitializeParams) => {
 	function initializeWorkspaceFolder(folder: WorkspaceFolder) {
 		const folderPath = URI.parse(folder.uri).fsPath;
-		const folderConfigs : FStarConfig[] = [];
-		findFilesByExtension(folderPath, ".fst.config.json").forEach(configFile => {
-			// console.log("Found config file " + configFile);
-			const contents = fs.readFileSync(configFile, 'utf8');
-			const config = JSON.parse(contents);
-			if (!config.cwd) {
-				config.cwd = folderPath;
-			}
-			folderConfigs.push(config);
-		});
-		return {folderPath, folderConfigs};
+		const configFiles = findFilesByExtension(folderPath, ".fst.config.json");
+		if (configFiles.length == 0) {
+			return;
+		}
+		if (configFiles.length > 1) {
+			console.log("Warning: multiple .fst.config.json files found in " + folderPath);
+		}
+		const configFile = configFiles[0];
+		// console.log("Found config file " + configFile);
+		const contents = fs.readFileSync(configFile, 'utf8');
+		const config = JSON.parse(contents);
+		if (!config.cwd) {
+			config.cwd = folderPath;
+		}
+		return {folderPath, config};
 	}
 	const capabilities = params.capabilities;
 	if (params.workspaceFolders) {
 		params.workspaceFolders?.forEach(folder => {
 			const pathAndConfig = initializeWorkspaceFolder(folder);
-			workspaceConfigs.set(pathAndConfig.folderPath, pathAndConfig.folderConfigs);			
+			if (pathAndConfig) {
+				workspaceConfigs.set(pathAndConfig.folderPath, pathAndConfig.config);
+			}
 		});
 		workspaceFolders = params.workspaceFolders;
 	}
