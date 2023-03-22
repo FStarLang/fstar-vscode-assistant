@@ -8,7 +8,8 @@
 		"type": "git",
 		"url": "https://github.com/FStarLang/fstar-vscode-assistant"
 	},
-	"publisher": "Nikhil Swamy",
+	"publisher": "FStarLang",
+	"icon":"resources/icons/fstar-logo.png",
 	"categories": [],
 	"keywords": [
 		"multi-root ready"

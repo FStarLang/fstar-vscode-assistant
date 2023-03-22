@@ -3,8 +3,8 @@
 	"description": "VSCode part of fstar-vscode-assistant",
 	"author": "Microsoft Corporation",
 	"license": "MIT",
-	"version": "0.0.1",
-	"publisher": "Nikhil Swamy",
+	"version": "0.0.2",
+	"publisher": "FStarLang",
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/FStarLang/fstar-vscode-assistant"
