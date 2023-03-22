@@ -645,19 +645,19 @@ const connection = createConnection(ProposedFeatures.all);
 
 
 function sendStatusStarted (msg : StatusStartedMessage)  {
-	connection.sendNotification('fstar-extension/statusStarted', msg);
+	connection.sendNotification('fstar-vscode-assistant/statusStarted', msg);
 }
 
 function sendStatusOk (msg : StatusOkMessage)  {
-	connection.sendNotification('fstar-extension/statusOk', msg);
+	connection.sendNotification('fstar-vscode-assistant/statusOk', msg);
 }
 
 function sendStatusFailed (msg : StatusFailedMessage)  {
-	connection.sendNotification('fstar-extension/statusFailed', msg);
+	connection.sendNotification('fstar-vscode-assistant/statusFailed', msg);
 }
 
 function sendStatusClear (msg: StatusClearMessage) {
-	connection.sendNotification('fstar-extension/statusClear', msg);
+	connection.sendNotification('fstar-vscode-assistant/statusClear', msg);
 }
 
 
@@ -1211,7 +1211,7 @@ connection.onDocumentRangeFormatting((formatParams : DocumentRangeFormattingPara
 	return [TextEdit.replace(formatParams.range, formattedCode)];
 });
 
-connection.onRequest("fstar-extension/verify-to-position", (params : any) => {
+connection.onRequest("fstar-vscode-assistant/verify-to-position", (params : any) => {
 	const uri = params[0];
 	const position : { line: number, character: number } = params[1];
 	// console.log("Received verify request with parameters: " + uri + " " + JSON.stringify(position));
@@ -1220,7 +1220,7 @@ connection.onRequest("fstar-extension/verify-to-position", (params : any) => {
 	validateFStarDocumentToPosition(textDocument, "verify-to-position", {line:position.line + 1, column:position.character});
 });
 
-connection.onRequest("fstar-extension/lax-to-position", (params : any) => {
+connection.onRequest("fstar-vscode-assistant/lax-to-position", (params : any) => {
 	const uri = params[0];
 	const position : { line: number, character: number } = params[1];
 	// console.log("Received lax-to-position request with parameters: " + uri + " " + JSON.stringify(position));
@@ -1229,7 +1229,7 @@ connection.onRequest("fstar-extension/lax-to-position", (params : any) => {
 	validateFStarDocumentToPosition(textDocument, "lax-to-position", {line:position.line + 1, column:position.character});
 });
 
-connection.onRequest("fstar-extension/restart", (uri : any) => {
+connection.onRequest("fstar-vscode-assistant/restart", (uri : any) => {
 	// console.log("Received restart request with parameters: " + uri);
 	const textDocument = documents.get(uri);
 	if (!textDocument) { return; }
@@ -1239,7 +1239,7 @@ connection.onRequest("fstar-extension/restart", (uri : any) => {
 	sendStatusClear({uri:textDocument.uri});
 });
 
-connection.onRequest("fstar-extension/text-doc-changed", (params : any) => {
+connection.onRequest("fstar-vscode-assistant/text-doc-changed", (params : any) => {
 	const uri = params[0];
 	const range : { line:number ; character:number} [] = params[1];
 	const textDocument = documents.get(uri);

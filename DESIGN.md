@@ -97,21 +97,21 @@ The `server.ts` sends an `autocomplete` IDE request to fstar_lax_ide.
 
 ## Custom events
 
-### `fstar-extension/verify-to-position`
+### `fstar-vscode-extension/verify-to-position`
 
 The user can trigger this event by using `Ctrl+.`
 
 server.ts sends a request to `fstar_ide` to check the document up
 to the current cursor position.
 
-### `fstar-extension/lax-to-position`
+### `fstar-vscode-extension/lax-to-position`
 
 The user can trigger this event by using `Ctrl+Shift+.`
 
 server.ts sends a request to `fstar_ide` to lax check the document up
 to the current cursor position.
 
-### `fstar-extension/restart`
+### `fstar-vscode-extension/restart`
 
 The user can trigger this event by using `Ctrl+; Ctrl+.`
 
@@ -121,7 +121,7 @@ clears any other document state, and then restarts the proceses.
 This is useful to rewind its state to the top of the current document
 and reload any dependences.
 
-### `fstar-extension/text-doc-changed`
+### `fstar-vscode-extension/text-doc-changed`
 
 When the document changes, the client forwards this event to the server, including
 the first position in the document of the change. This position is not available in 
@@ -136,14 +136,14 @@ requests to check fragments of the document whose position is at `p` or beyond.
 In addition to standard LSP diagnostics, hover events, definitions, completions etc., 
 we have the following four custom messages send from server.ts to client.ts
 
-* `fstar-extension/statusStarted`: A message to show which fragment of the document
+* `fstar-vscode-extension/statusStarted`: A message to show which fragment of the document
    is currently being processed by `fstar_ide`, used to show hourglass icons.
 
-* `fstar-extension/statusOk`: A message to show which fragment of the document was checked,
+* `fstar-vscode-extension/statusOk`: A message to show which fragment of the document was checked,
    either fully checked or lax checked, showing either checkmarks or question marks
    in the gutter.
 		
-* `fstar-extension/statusClear`: A message to clear all gutter icons.
+* `fstar-vscode-extension/statusClear`: A message to clear all gutter icons.
 
-* `fstar-extension/statusFailed`: A message to indicate that checking has failed on a fragment,
+* `fstar-vscode-extension/statusFailed`: A message to indicate that checking has failed on a fragment,
    which causes the extension to clear any hourglass icons that remain.

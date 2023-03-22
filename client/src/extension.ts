@@ -180,31 +180,31 @@ export function activate(context: ExtensionContext) {
 	);
 	
 	client.onReady().then(() => {
-		client.onNotification('fstar-extension/statusOk', handleStatusOk);
-		client.onNotification('fstar-extension/statusClear', handleStatusClear);
-		client.onNotification('fstar-extension/statusStarted', handleStatusStarted);
-		client.onNotification('fstar-extension/statusFailed', handleStatusFailed);
+		client.onNotification('fstar-vscode-assistant/statusOk', handleStatusOk);
+		client.onNotification('fstar-vscode-assistant/statusClear', handleStatusClear);
+		client.onNotification('fstar-vscode-assistant/statusStarted', handleStatusStarted);
+		client.onNotification('fstar-vscode-assistant/statusFailed', handleStatusFailed);
 	});
 	vscode.window.onDidChangeActiveTextEditor(handleDidChangeActiveEditor);
 
 	// register a command for Ctrl+.
-	const verifyCommand = vscode.commands.registerTextEditorCommand('fstar-extension/verify-to-position', (textEditor, edit) => {
+	const verifyCommand = vscode.commands.registerTextEditorCommand('fstar-vscode-assistant/verify-to-position', (textEditor, edit) => {
 		// console.log('Client: Command <verify-to-position> executed with uri: ' + textEditor.document.uri + " at positon " + textEditor.selection.active.line + ", " + textEditor.selection.active.character);
-		client.sendRequest('fstar-extension/verify-to-position', [textEditor.document.uri.toString(), textEditor.selection.active]);
+		client.sendRequest('fstar-vscode-assistant/verify-to-position', [textEditor.document.uri.toString(), textEditor.selection.active]);
 	});
 	context.subscriptions.push(verifyCommand);
 
 	// register a command for Ctrl+;,Ctrl+.
-	const reloadAndVerifyCommand = vscode.commands.registerTextEditorCommand('fstar-extension/restart', (textEditor, edit) => {
+	const reloadAndVerifyCommand = vscode.commands.registerTextEditorCommand('fstar-vscode-assistant/restart', (textEditor, edit) => {
 		// console.log('Client: Command <restart> executed with uri: ' + textEditor.document.uri);
-		client.sendRequest('fstar-extension/restart', textEditor.document.uri.toString());
+		client.sendRequest('fstar-vscode-assistant/restart', textEditor.document.uri.toString());
 	});
 	context.subscriptions.push(reloadAndVerifyCommand);
 
 	// register a command for Ctrl+Shift+.
-	const laxVerifyCommand = vscode.commands.registerTextEditorCommand('fstar-extension/lax-to-position', (textEditor, edit) => {
+	const laxVerifyCommand = vscode.commands.registerTextEditorCommand('fstar-vscode-assistant/lax-to-position', (textEditor, edit) => {
 		// console.log('Client: Command <lax-to-position> executed with uri: ' + textEditor.document.uri + " at positon " + textEditor.selection.active.line + ", " + textEditor.selection.active.character);
-		client.sendRequest('fstar-extension/lax-to-position', [textEditor.document.uri.toString(), textEditor.selection.active]);
+		client.sendRequest('fstar-vscode-assistant/lax-to-position', [textEditor.document.uri.toString(), textEditor.selection.active]);
 	});
 	context.subscriptions.push(verifyCommand);
 	
@@ -229,7 +229,7 @@ export function activate(context: ExtensionContext) {
 			}
 		});
 		if (minRange) {
-			client.sendRequest('fstar-extension/text-doc-changed', [textDoc.uri.toString(), minRange]);
+			client.sendRequest('fstar-vscode-assistant/text-doc-changed', [textDoc.uri.toString(), minRange]);
 		}
 	});
 

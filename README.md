@@ -50,20 +50,23 @@ There are three kinds of gutter icons:
   entire contents of the file, stopping at the first error. You should see check marks
   in the gutter for the prefix of the file that was checked.
 
-* Check to current cursor: The key-binding `Ctrl+.` advances the checker up to the
+* F*: Check to position: The key-binding `Ctrl+.` advances the checker up to the
   F* definition that encloses the current cursor position. 
 
-* Lax check to current cursor: The key-binding `Ctrl+Shift+.` advances the checker by
+* F*: Lax to position: The key-binding `Ctrl+Shift+.` advances the checker by
   lax-checking the document up to the F* definition enclosing the current cursor position.
   This is useful if you want to quickly advance the checker past a chunk of document which
   might otherwise take a long time to check.
 
-* Restart: The key-binding `Ctrl+; Ctrl+.` restarts the F* session for the current document,
+* F*: Restart: The key-binding `Ctrl+; Ctrl+.` restarts the F* session for the current document,
   rewindind the checker to the top of the document and rescanning it to load any dependences
   that may have changed.
 
 * Check file on save: When the file is saved, the checker is advances in full checking mode
   to the end of the document. This is equivalent to doing `Ctrl+.` on the last line of the document.
+
+All these commands can be found in the command pallette by doing `Ctrl+Shift+p`
+and searching for "F*". You can also rebind the keybindings as you wish there.
 
 Note, although checking the document proceeds in a linear, top-down fashion, at no point is any
 fragment of the document locked. You can keep editing a document while F* is checking some prefix 

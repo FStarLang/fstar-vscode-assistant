@@ -3,7 +3,7 @@
 	"description": "An interactive editing mode for F*",
 	"author": "Microsoft Corporation",
 	"license": "MIT",
-	"version": "0.0.1",
+	"version": "0.0.2",
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/FStarLang/fstar-vscode-assistant"
@@ -56,19 +56,37 @@
 				}
 			}
 		},
+		"commands" :[
+			{
+				"command": "fstar-vscode-assistant/verify-to-position",
+				"title": "Verify to position",
+				"category": "F*"
+
+			},
+			{
+				"command": "fstar-vscode-assistant/restart",
+				"title": "Restart",
+				"category": "F*"
+			},
+			{
+				"command": "fstar-vscode-assistant/lax-to-position",
+				"title": "Lax to position",
+				"category": "F*"
+			}
+		],
 		"keybindings": [
 			{
-			  "command": "fstar-extension/verify-to-position",
+			  "command": "fstar-vscode-assistant/verify-to-position",
 			  "key": "ctrl+.",
 			  "when": "editorTextFocus"
 			},
 			{
-				"command": "fstar-extension/restart",
+				"command": "fstar-vscode-assistant/restart",
 				"key": "ctrl+; ctrl+.",
 				"when": "editorTextFocus"
 			},
 			{
-				"command": "fstar-extension/lax-to-position",
+				"command": "fstar-vscode-assistant/lax-to-position",
 				"key": "ctrl+shift+.",
 				"when": "editorTextFocus"
 			} 
