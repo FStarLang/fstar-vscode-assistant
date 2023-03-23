@@ -3,13 +3,13 @@
 	"description": "An interactive editing mode for F*",
 	"author": "Microsoft Corporation",
 	"license": "MIT",
-	"version": "0.0.2",
+	"version": "0.1.0",
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/FStarLang/fstar-vscode-assistant"
 	},
 	"publisher": "FStarLang",
-	"icon":"resources/icons/fstar-logo.png",
+	"icon": "resources/icons/fstar-logo.png",
 	"categories": [],
 	"keywords": [
 		"multi-root ready"
@@ -22,17 +22,27 @@
 	],
 	"main": "./client/out/extension",
 	"contributes": {
-		"languages": [{
-			"id": "fstar",
-			"aliases": ["F*", "fstar"],
-			"extensions": [".fst",".fsti"],
-			"configuration": "./language-configuration.json"
-		  }],
-		"grammars": [{
-			"language": "fstar",
-			"scopeName": "source.fst",
-			"path": "./syntaxes/fstar.tmLanguage.json"
-		}],
+		"languages": [
+			{
+				"id": "fstar",
+				"aliases": [
+					"F*",
+					"fstar"
+				],
+				"extensions": [
+					".fst",
+					".fsti"
+				],
+				"configuration": "./language-configuration.json"
+			}
+		],
+		"grammars": [
+			{
+				"language": "fstar",
+				"scopeName": "source.fst",
+				"path": "./syntaxes/fstar.tmLanguage.json"
+			}
+		],
 		"configuration": {
 			"type": "object",
 			"title": "Example configuration",
@@ -56,12 +66,11 @@
 				}
 			}
 		},
-		"commands" :[
+		"commands": [
 			{
 				"command": "fstar-vscode-assistant/verify-to-position",
 				"title": "Verify to position",
 				"category": "F*"
-
 			},
 			{
 				"command": "fstar-vscode-assistant/restart",
@@ -76,9 +85,9 @@
 		],
 		"keybindings": [
 			{
-			  "command": "fstar-vscode-assistant/verify-to-position",
-			  "key": "ctrl+.",
-			  "when": "editorTextFocus"
+				"command": "fstar-vscode-assistant/verify-to-position",
+				"key": "ctrl+.",
+				"when": "editorTextFocus"
 			},
 			{
 				"command": "fstar-vscode-assistant/restart",
@@ -89,7 +98,7 @@
 				"command": "fstar-vscode-assistant/lax-to-position",
 				"key": "ctrl+shift+.",
 				"when": "editorTextFocus"
-			} 
+			}
 		]
 	},
 	"dependencies": {
