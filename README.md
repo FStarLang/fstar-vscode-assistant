@@ -11,9 +11,7 @@ https://github.com/artagnon/vsfstar
 
 ## Installation
 
-An initial test release v0.0.1 is provided as a .vsix package in the Releases section. 
-
-In VSCode, click on extensions menu on the right, and then choose "Install from VSIX"
+An initial release v0.1.1 is available on the VSCode marketplace.
 
 You need to have a working F* installation, where `fstar.exe` is in your path
 and `fstar.exe --ide A.fst` should print the following protocol-info:
@@ -149,7 +147,7 @@ Also, a disclaimer: This is my first non-trivial VSCode extension and I may well
 conventions that extension users may expect. Any contributions or suggestions to bring it more in
 line with existing conventions are most welcome.
 
-Also, I have been using this extension myself for the past couple of weeks, while developing it. 
+Also, I have been using this extension myself only for the past couple of weeks, while developing it. 
 
 ## Running it in development mode
 
@@ -176,3 +174,5 @@ Also, I have been using this extension myself for the past couple of weeks, whil
 
   - You should see some syntax highlighting
   - And, as you type, you should see F* checking your code and providing diagnostics interactively
+
+- You might also want to read DESIGN.md, if you want to contribute.
