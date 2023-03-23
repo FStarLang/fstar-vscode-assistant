@@ -235,7 +235,7 @@ interface VfsAdd {
 interface FullBufferQuery {
 	query: 'full-buffer';
 	args:{
-		kind:'full' | 'cache' | 'reload-deps' | 'verify-to-position' | 'lax-to-position';
+		kind:'full' | 'full-with-symbols' | 'cache' | 'reload-deps' | 'verify-to-position' | 'lax-to-position';
 		code:string;
 		line:number;
 		column:number
@@ -321,11 +321,12 @@ function validateFStarDocument(textDocument: TextDocument,kind:'full'|'cache'|'r
 		}
 		sendStatusClear({uri:textDocument.uri});
 	}
+	const k = kind=="full" && lax ? "full-with-symbols" : kind;
 	if (supportsFullBuffer) {
 		const push_context : FullBufferQuery = { 
 			query:"full-buffer",
 			args:{
-				kind:kind,
+				kind:k,
 				code:textDocument.getText(),
 				line:0,
 				column:0
@@ -559,7 +560,7 @@ function findWordAtPosition(textDocument: TextDocument, position: Position) : Wo
 	}
 	const end = text.substring(offset).search(notIdentCharRegex);
 	const word = text.substring(start, end >= 0 ? end + offset : undefined);
-	const range = Range.create(textDocument.positionAt(start), textDocument.positionAt(end));
+	const range = Range.create(textDocument.positionAt(start), textDocument.positionAt(start + word.length));
 	return {word: word, range: rangeAsFStarRange(range)};
 }
 
@@ -972,8 +973,9 @@ function refreshDocumentState(textDocument : TextDocument) {
 			options,
 			{cwd:fstarConfig.cwd});
 
-	// Same options for the lax process, just add --lax
-	options.push("--lax");
+	// The lax process actually runs with admit_smt_queries
+	options.push("--admit_smt_queries");
+	options.push("true");
 	const fstar_lax_ide =
 		cp.spawn(
 			fstarConfig.fstar_exe,
@@ -1019,7 +1021,8 @@ documents.onDidOpen( e => {
 	// And ask the main fstar process to verify it
 	validateFStarDocument(textDocument, "full");
 
-	// The lax fstar will run in the background and will send us diagnostics as it goes	
+	// And ask the lax fstar process to verify it
+	validateFStarDocument(textDocument, "full", "lax");
 });
 
 function killFStarProcessesForDocument(textDocument : TextDocument) {
@@ -1243,6 +1246,8 @@ connection.onRequest("fstar-vscode-assistant/restart", (uri : any) => {
 	refreshDocumentState(textDocument);
 	connection.sendDiagnostics({uri:textDocument.uri, diagnostics:[]});
 	sendStatusClear({uri:textDocument.uri});
+	// And ask the lax fstar process to verify it
+	validateFStarDocument(textDocument, "full", "lax");
 });
 
 connection.onRequest("fstar-vscode-assistant/text-doc-changed", (params : any) => {
