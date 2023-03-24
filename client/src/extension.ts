@@ -34,11 +34,20 @@ const gutterIconHourglass = vscode.window.createTextEditorDecorationType({
 	gutterIconPath: path.join(__filename, '..', '..', '..', 'resources',  'icons', 'hourglass.svg')
 });
 
+// This is the hourglass icon that will be displayed in the gutter
+const gutterIconEye = vscode.window.createTextEditorDecorationType({
+	gutterIconSize: 'contain',
+	gutterIconPath: path.join(__filename, '..', '..', '..', 'resources',  'icons', 'eye.svg')
+});
+
 // A map from file URI to the gutter decorations positions for it
 const gutterOkDecorationsMap : Map<string, vscode.Range[]> = new Map<string, vscode.Range[]>();
 
 // A map from file URI to the gutter decorations positions for it
 const gutterLaxDecorationsMap : Map<string, vscode.Range[]> = new Map<string, vscode.Range[]>();
+
+// A map from file URI to the gutter decorations positions for it
+const gutterFlyCheckDecorationsMap : Map<string, vscode.Range[]> = new Map<string, vscode.Range[]>();
 
 // A background color for text being verified: Not currently used
 const inProgressBackground = vscode.window.createTextEditorDecorationType({
@@ -49,9 +58,10 @@ const inProgressBackground = vscode.window.createTextEditorDecorationType({
 const proofInProgressDecorationMap : Map<string, vscode.Range[]> = new Map<string, vscode.Range[]>();
 
 // Messags in the small protocol running on top of LSP between the server and client
+type ok_kind = 'checked' | 'light-checked' | 'flychecked';
 interface StatusOkMessage {
 	uri: string;
-	lax: boolean;
+	ok_kind: ok_kind;
 	ranges: vscode.Range [];
 }
 
@@ -77,6 +87,7 @@ function setActiveEditorDecorationsIfUriMatches(uri: string) {
 	if (!editor) {	return; }
 	if (editor.document.uri.toString() === uri) {
 		const currentDecorations = gutterOkDecorationsMap.get(uri) ?? [];
+		editor.setDecorations(gutterIconEye, gutterFlyCheckDecorationsMap.get(uri) ?? []);
 		editor.setDecorations(gutterIconOk, currentDecorations);
 		editor.setDecorations(gutterIconLax, gutterLaxDecorationsMap.get(uri) ?? []);
 		// editor.setDecorations(inProgressBackground, backgroundColorDecorationMap.get(uri) ?? []);
@@ -89,13 +100,19 @@ function setActiveEditorDecorationsIfUriMatches(uri: string) {
 // clearing any hourglass decorations
 // and set the decorations for the active editor if the URI matches
 function handleStatusOk (msg : StatusOkMessage)  {
-	if (msg.lax) {
+	if (msg.ok_kind == "light-checked") {
 		const currentDecorations : vscode.Range [] = gutterLaxDecorationsMap.get(msg.uri) ?? [];
 		msg.ranges.forEach (range => {
 			currentDecorations.push(range);
 		});
-		gutterLaxDecorationsMap.set(msg.uri, currentDecorations);
-	
+		gutterLaxDecorationsMap.set(msg.uri, currentDecorations);	
+	}
+	else if (msg.ok_kind == "flychecked") {
+		const currentDecorations : vscode.Range [] = gutterFlyCheckDecorationsMap.get(msg.uri) ?? [];
+		msg.ranges.forEach (range => {
+			currentDecorations.push(range);
+		});
+		gutterFlyCheckDecorationsMap.set(msg.uri, currentDecorations);
 	}
 	else {
 		const currentDecorations : vscode.Range [] = gutterOkDecorationsMap.get(msg.uri) ?? [];
@@ -129,12 +146,9 @@ function handleStatusStarted (msg: StatusStartedMessage): void {
 // We clear the gutter decorations for the file
 function handleStatusClear (msg: StatusClearMessage): void {
 	// console.log("Received statusClear notification: " +msg);
-	const currentDecorations : vscode.Range [] = gutterOkDecorationsMap.get(msg.uri) ?? [];
-	currentDecorations.length = 0;
-	gutterOkDecorationsMap.set(msg.uri, currentDecorations);
-	const currentLaxDecorations : vscode.Range [] = gutterLaxDecorationsMap.get(msg.uri) ?? [];
-	currentLaxDecorations.length = 0;
-	gutterLaxDecorationsMap.set(msg.uri, currentLaxDecorations);
+	gutterOkDecorationsMap.set(msg.uri, []);
+	gutterLaxDecorationsMap.set(msg.uri, []);
+	gutterFlyCheckDecorationsMap.set(msg.uri, []);
 	setActiveEditorDecorationsIfUriMatches(msg.uri);
 }
 
@@ -235,7 +249,7 @@ export function activate(context: ExtensionContext) {
 
 	// Start the client. This will also launch the server
 	context.subscriptions.push(client.start());
-
+	const settings = workspace.getConfiguration('fstarVSCodeAssistant');
 }
 
 export function deactivate(): Thenable<void> | undefined {

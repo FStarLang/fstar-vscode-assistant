@@ -30,8 +30,22 @@ The extensions highlights all keywords in an F* source file, triggered on .fst a
 
 The main feature offered by this extension is to incrementally check the contents of an F* document.
 
-For each line of the document, F* indicates the checking status with an icon in the gutter
-on the left of the editor pane.
+There are three forms of checking:
+
+  * Light checking: Where F* checks the basic well-formedness of a program, but
+    without proving that it is fully type correct. This form of checking is sufficient
+    to detect basic typing errors, e.g., treating an integer as a string. Note, 
+    light checking corresponds to checking a definition with `--admit_smt_queries true`.
+
+  * Fly checking: Where F* implicitly light-checks the document every time the document changes.
+
+  * Full checking: Where F* typechecks a program and proves it correct.
+
+This extension launches two F* processes for each document: One for fly-checking
+and another for explicit user-triggered checking requests.
+
+For each line of the document for which the user explicitly requested checking
+F* indicates the checking status with an icon in the gutter on the left of the editor pane.
 
 There are three kinds of gutter icons:
 
@@ -40,42 +54,57 @@ There are three kinds of gutter icons:
 2. An hourglass: This line is currently being processed by F*
 
 3. A question mark: This line was processed by F*, but the user instructed 
-   F* to skip proving it (it was checked according to F*'s lax mode)
+   F* to only light check it.
 
-** Basic Navigation ** 
+#### Basic Navigation
 
-* Check file on opening: When a file is opened, F* attempts to check the
-  entire contents of the file, stopping at the first error. You should see check marks
-  in the gutter for the prefix of the file that was checked.
+* Fly-check on opening: When a file is opened, F* will, by default, 
+  fly-check the entire entire contents of the file,
+  stopping at the first error. Any errors will be reported in the problem pane
+  and as "squigglies". Symbols are resolved and hover and jump-to-definition
+  tools should work.
 
 * F*: Check to position: The key-binding `Ctrl+.` advances the checker up to the
-  F* definition that encloses the current cursor position. 
+  F* definition that encloses the current cursor position, fully checking.
 
-* F*: Lax to position: The key-binding `Ctrl+Shift+.` advances the checker by
-  lax-checking the document up to the F* definition enclosing the current cursor position.
+* F*: Light check to position: The key-binding `Ctrl+Shift+.` advances the checker by
+  light-checking the document up to the F* definition enclosing the current cursor position.
   This is useful if you want to quickly advance the checker past a chunk of document which
   might otherwise take a long time to check.
 
 * F*: Restart: The key-binding `Ctrl+; Ctrl+.` restarts the F* session for the current document,
   rewindind the checker to the top of the document and rescanning it to load any dependences
-  that may have changed.
+  that may have changed, and fly-checking it to load symbols.
 
-* Check file on save: When the file is saved, the checker is advances in full checking mode
-  to the end of the document. This is equivalent to doing `Ctrl+.` on the last line of the document.
-
-All these commands can be found in the command pallette by doing `Ctrl+Shift+p`
-and searching for "F*". You can also rebind the keybindings as you wish there.
+* Check file on save: When the file is saved, or when doing `Ctrl+s`, the
+  checker is advanced in full checking mode to the end of the document.
+  This is equivalent to doing `Ctrl+.` on the last line of the document.
 
 Note, although checking the document proceeds in a linear, top-down fashion, at no point is any
 fragment of the document locked. You can keep editing a document while F* is checking some prefix 
 of it.
 
-### Flycheck
+#### Settings
 
-In addition to checking the document as described above, this extension uses a second, completely
-independent F* process to lax-check the changed part of document at each keystroke. 
+You can reconfigure some of the behavior of the extension in the "User Settings" menu of VSCode.
 
-This should give you feedback on basic type errors as you type.
+Launch the command pallette using `Ctrl+Shift+p`.
+
+Search for User Settings and then for `F* VSCode Assistant` in the `Extensions` category.
+
+You can change the following:
+
+  * verifyOnOpen: Set this flag to fully check a file when it is opened
+
+  * laxOnChange: You can choose whether or not F* should light-check a document
+    at every key stroke.
+
+  * debug: Set this flag to have the extension log debug information to the console.
+
+You can also change the keybindings:
+
+In the command pallete, search for "F*" and you can see the commands supported there
+and view or edit the current key bindings.
 
 ### Diagnostic squigglies for errors and warnings
 

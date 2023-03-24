@@ -46,6 +46,12 @@ import { pathToFileURL } from 'url';
 // The state of the LSP server
 ////////////////////////////////////////////////////////////////////////////////////
 
+interface fstarVSCodeAssistantSettings {
+	verifyOnOpen: boolean;
+	flyCheck: boolean;
+	debug: boolean;
+}
+
 interface IDEState {
 	// The main fstar.exe process for verifying the current document
 	fstar_ide: cp.ChildProcess;
@@ -64,6 +70,11 @@ interface IDEState {
 }
 
 const documentStates: Map<string, IDEState> = new Map();
+let configurationSettings : fstarVSCodeAssistantSettings = {
+	verifyOnOpen: false,
+	flyCheck: true,
+	debug: true
+};
 
 ////////////////////////////////////////////////////////////////////////////////////
 // Workspace config files
@@ -300,7 +311,9 @@ function sendRequestForDocument(textDocument : TextDocument, msg:any, lax?:'lax'
 		msg["query-id"] = '' + (qid + 1);
 		const text = JSON.stringify(msg);
 		const proc = lax ? doc_state.fstar_lax_ide : doc_state.fstar_ide;
-		console.log(">>> " +text);
+		if (configurationSettings.debug) {
+			console.log(">>> " +text);
+		}
 		proc?.stdin?.write(text);
 		proc?.stdin?.write("\n");
 	}
@@ -406,9 +419,10 @@ interface StatusStartedMessage {
 
 // A message to dislay check-mark gutter icons for the document of the given URI
 // at the given ranges
+type ok_kind = 'checked' | 'light-checked' | 'flychecked';
 interface StatusOkMessage {
 	uri: string;
-	lax: boolean;
+	ok_kind: ok_kind;
 	ranges: Range []; // A VSCode range, not an FStarRange
 }
 
@@ -428,7 +442,7 @@ function checkFileInDirectory(dirPath : string, filePath :string) : boolean {
 	// Check if dirPath is a directory using fs.stat()
 	const stats = fs.statSync(dirPath);
 	if (!stats || !stats.isDirectory()) {
-		console.log(dirPath + ' is not a directory');
+		//console.log(dirPath + ' is not a directory');
 		return false;
 	}
 
@@ -668,7 +682,9 @@ function sendStatusClear (msg: StatusClearMessage) {
 
  // Event handler for stdout on fstar_ide
  function handleFStarResponseForDocument(textDocument: TextDocument, data:string, lax:boolean) {
-	console.log("<<< " + (lax? "lax" : "") + "uri:<" +textDocument.uri + ">:" +data);
+	if (configurationSettings.debug) {
+		console.log("<<< " + (lax? "lax" : "") + "uri:<" +textDocument.uri + ">:" +data);
+	}
 	const lines = data.toString().split('\n');
 	lines.forEach(line => { handleOneResponseForDocument(textDocument, line, lax);  });
 }
@@ -682,15 +698,15 @@ function handleOneResponseForDocument(textDocument: TextDocument, data:string, l
 		r = JSON.parse(data);
 	} 
 	catch (err) {
-		console.log("Error parsing response: " + err);
+		console.error("Error parsing response: " + err);
 		return;
 	}
 	if (r.kind == "protocol-info") {
 		return handleIdeProtocolInfo(textDocument, r as ProtocolInfo);
 	}
-	else if (r.kind == "message" && r.level == "progress" && !lax) {
+	else if (r.kind == "message" && r.level == "progress") {
 		//Discard progress messages from fstar_lax_ide
-		return handleIdeProgress(textDocument, r.contents as IdeProgress);
+		return handleIdeProgress(textDocument, r.contents as IdeProgress, lax);
 	}
 	else if (r.kind == "message" && r.level == "proof-state") {
 		if (!r.contents) { return; }
@@ -714,7 +730,9 @@ function handleOneResponseForDocument(textDocument: TextDocument, data:string, l
 		}
 	}
 	else {
-		console.log("Unhandled response: " + r.kind);
+		if (configurationSettings.debug) {
+			console.log("Unhandled response: " + r.kind);
+		}
 	}
 }
 
@@ -722,7 +740,7 @@ function handleOneResponseForDocument(textDocument: TextDocument, data:string, l
  function handleIdeProtocolInfo(textDocument: TextDocument, pi : ProtocolInfo) {
 	if (!pi.features.includes("full-buffer")) {
 		supportsFullBuffer = false;
-		console.log("fstar.exe does not support full-buffer queries.");
+		console.error("fstar.exe does not support full-buffer queries.");
 	}
 } 
 
@@ -756,7 +774,7 @@ function handleIdeProofState (textDocument: TextDocument, response : IdeProofSta
 //
 // We use that to send a status-ok which will clear the hourglass icon
 // and show a checkmark in the gutter for the locations we send
-function handleIdeProgress(textDocument: TextDocument, contents : IdeProgress) {
+function handleIdeProgress(textDocument: TextDocument, contents : IdeProgress, lax:boolean) {
 	const doc_state = documentStates.get(textDocument.uri);
 	if (!doc_state) { return; }
 	if (contents.stage == "full-buffer-fragment-ok" ||
@@ -768,14 +786,20 @@ function handleIdeProgress(textDocument: TextDocument, contents : IdeProgress) {
 		const currentText = textDocument.getText(fstarRangeAsRange(code_fragment.range));
 		const okText = code_fragment.code;
 		if (currentText.trim() != okText.trim()) { 
-			// console.log("!!!!!!!!!!!!!!!!!!!!!Expected text: <\n" + okText + "\n> but got: <\n" + currentText + "\n>");
+			if (configurationSettings.debug) {
+				console.log("Not setting gutter ok icon: Expected text: <\n" + okText + "\n> but got: <\n" + currentText + "\n>");
+			}
 			doc_state.prefix_stale = true;
 			return;
 		}
 		const ok_range = Range.create(mkPosition(rng.beg), mkPosition(rng.end));
-		const msg = {
+		let ok_kind  : ok_kind;
+		if (lax) { ok_kind = "flychecked"; }
+		else if (contents.stage == "full-buffer-fragment-lax-ok") { ok_kind = "light-checked"; }
+		else { ok_kind = "checked";}
+		const msg : StatusOkMessage = {
 			uri: textDocument.uri,
-			lax: contents.stage == "full-buffer-fragment-lax-ok",
+			ok_kind: ok_kind,
 			ranges: [ok_range]
 		};
 		sendStatusOk(msg);	
@@ -818,6 +842,7 @@ function handleIdeDiagnostics (textDocument : TextDocument, response : IdeError 
 		}
 	}
 	if (!response || !(Array.isArray(response))) { return; }
+	const diagnostics : Diagnostic[]= [];
 	response.forEach((err) => {
 		err.ranges.forEach ((rng) => {
 			const diag = {
@@ -828,9 +853,11 @@ function handleIdeDiagnostics (textDocument : TextDocument, response : IdeError 
 				},
 				message: err.message
 			};
-			connection.sendDiagnostics({uri:textDocument.uri, diagnostics:[diag]});
+			diagnostics.push(diag);
 		});
 	}); 
+	connection.sendDiagnostics({uri:textDocument.uri, diagnostics: diagnostics});
+
 }
 
 function handleIdeAutoComplete(textDocument : TextDocument, response : IdeAutoCompleteResponses) {
@@ -876,7 +903,7 @@ connection.onInitialize((params: InitializeParams) => {
 			return;
 		}
 		if (configFiles.length > 1) {
-			console.log("Warning: multiple .fst.config.json files found in " + folderPath);
+			console.error("Warning: multiple .fst.config.json files found in " + folderPath);
 		}
 		const configFile = configFiles[0];
 		// console.log("Found config file " + configFile);
@@ -935,27 +962,45 @@ connection.onInitialize((params: InitializeParams) => {
 	return result;
 });
 
-// The client acknowledged the initialization
-connection.onInitialized(() => {
+async function updateConfigurationSettings() {
+	const settings = await connection.workspace.getConfiguration('fstarVSCodeAssistant');
+	if (settings.debug) {
+		console.log("Server got settings: " + JSON.stringify(settings));
+	}
+	configurationSettings = settings;
+}
+
+async function onInitializedHandler() {
+	updateConfigurationSettings();
 	if (hasConfigurationCapability) {
 		// Register for all configuration changes.
 		connection.client.register(DidChangeConfigurationNotification.type, undefined);
+		// const settings = connection.workspace.getConfiguration('fstarVSCodeAssistant');
+		// const settings = connection.workspace.getConfiguration();
+		// console.log("Server got settings: " + JSON.stringify(settings));
 	}
 	if (hasWorkspaceFolderCapability) {
 		connection.workspace.onDidChangeWorkspaceFolders(_event => {
 			// We don't do anything special when workspace folders change
 			// We should probably reset the workspace configs and re-read the .fst.config.json files
-			connection.console.log('Workspace folder change event received.');
+			if (configurationSettings.debug) {
+				connection.console.log('Workspace folder change event received.');
+			}
 		});
 	}
+}
+
+// The client acknowledged the initialization
+connection.onInitialized(() => {
+	onInitializedHandler();
 });
 
 // We don't do anything special when the configuration changes
 connection.onDidChangeConfiguration(change => {
-	return;
+	updateConfigurationSettings();
 });
 
-function refreshDocumentState(textDocument : TextDocument) {
+async function refreshDocumentState(textDocument : TextDocument) {
 	// Find its config file
 	const fstarConfig = findConfigFile(textDocument);
 
@@ -966,7 +1011,9 @@ function refreshDocumentState(textDocument : TextDocument) {
 	fstarConfig.options.forEach((opt) => { options.push(opt); });
 	fstarConfig.include_dirs.forEach((dir) => { options.push("--include"); options.push(dir); });
 
-	console.log("Spawning fstar with options: " +options);
+	if (configurationSettings.debug) {
+		console.log("Spawning fstar with options: " +options);
+	}
 	const fstar_ide =
 		cp.spawn(
 			fstarConfig.fstar_exe,
@@ -996,15 +1043,30 @@ function refreshDocumentState(textDocument : TextDocument) {
 	// Set the event handlers for the fstar processes
 	fstar_ide.stdin.setDefaultEncoding('utf-8');
 	fstar_ide.stdout.on('data', (data) => { handleFStarResponseForDocument(textDocument, data, false); });
-	fstar_ide.stderr.on('data', (data) => { console.log("fstar stderr: " +data); });
+	fstar_ide.stderr.on('data', (data) => { console.error("fstar stderr: " +data); });
 	fstar_lax_ide.stdin.setDefaultEncoding('utf-8');
 	fstar_lax_ide.stdout.on('data', (data) => { handleFStarResponseForDocument(textDocument, data, true); });
-	fstar_lax_ide.stderr.on('data', (data) => { console.log("fstar lax stderr: " +data); });
+	fstar_lax_ide.stderr.on('data', (data) => { console.error("fstar lax stderr: " +data); });
 	
 	// Send the initial dummy vfs-add request to the fstar processes
 	const vfs_add : VfsAdd = {"query":"vfs-add","args":{"filename":null,"contents":textDocument.getText()}};
 	sendRequestForDocument(textDocument, vfs_add);
 	sendRequestForDocument(textDocument, vfs_add, 'lax');
+}
+
+async function onOpenHandler(textDocument : TextDocument) {
+	await refreshDocumentState(textDocument);
+
+	const docState = documentStates.get(textDocument.uri);
+	if (docState === undefined) { return; }
+
+	// And ask the main fstar process to verify it
+	if (configurationSettings.verifyOnOpen) {
+		validateFStarDocument(textDocument, "full");
+	}
+
+	// And ask the lax fstar process to verify it
+	validateFStarDocument(textDocument, "full", "lax");
 }
 
 // The main entry point when a document is opened
@@ -1013,17 +1075,25 @@ function refreshDocumentState(textDocument : TextDocument) {
 //  * set event handlers to read the output of the fstar processes
 //  * send the current document to both processes to start typechecking
 documents.onDidOpen( e => {
-	// The document in the current editor
-	const textDocument = e.document;
-
-	refreshDocumentState(textDocument);
-
-	// And ask the main fstar process to verify it
-	validateFStarDocument(textDocument, "full");
-
-	// And ask the lax fstar process to verify it
-	validateFStarDocument(textDocument, "full", "lax");
+	onOpenHandler(e.document);
 });
+
+// 	const settings = connection.workspace.getConfiguration({
+// 		scopeUri: textDocument.uri,
+// 		section: 'fstarVSCodeAssistant'
+// 	});
+// 	settings.then((s) => {
+// 		console.log("Got settings on open: " + JSON.stringify(settings));
+// 	});
+	
+// 	await refreshDocumentState(textDocument);
+
+// 	// And ask the main fstar process to verify it
+// 	validateFStarDocument(textDocument, "full");
+
+// 	// And ask the lax fstar process to verify it
+// 	validateFStarDocument(textDocument, "full", "lax");
+// });
 
 function killFStarProcessesForDocument(textDocument : TextDocument) {
 	const docState = documentStates.get(textDocument.uri);
@@ -1041,7 +1111,9 @@ documents.onDidClose(e => {
 // The content of a text document has changed. This event is emitted
 // when the text document first opened or when its content has changed.
 documents.onDidChangeContent(change => {
-	validateFStarDocument(change.document, "full", 'lax');
+	if (configurationSettings.flyCheck) {
+		validateFStarDocument(change.document, "full", 'lax');
+	}
 	validateFStarDocument(change.document, "cache");
 });
 
@@ -1204,9 +1276,6 @@ connection.onDocumentRangeFormatting((formatParams : DocumentRangeFormattingPara
 						["--ide", "prims.fst"], 
 						{input: JSON.stringify(format_query)});
 	const data = fstarFormatter.stdout.toString();
-	// console.log("Formatter stdout: " + data);
-	// data.trim().split("\n").forEach(line => { console.log("Formatter stdout: " + line); });
-	// return [];
 	const replies = data.trim().split('\n').map(line => {  return JSON.parse(line); });
 	if (replies.length != 2 ||
 		replies[0].kind != "protocol-info" ||
@@ -1238,16 +1307,20 @@ connection.onRequest("fstar-vscode-assistant/lax-to-position", (params : any) =>
 	validateFStarDocumentToPosition(textDocument, "lax-to-position", {line:position.line + 1, column:position.character});
 });
 
-connection.onRequest("fstar-vscode-assistant/restart", (uri : any) => {
-	// console.log("Received restart request with parameters: " + uri);
-	const textDocument = documents.get(uri);
+async function onRestartHandler(textDocument?:TextDocument) {
 	if (!textDocument) { return; }
 	killFStarProcessesForDocument(textDocument);
-	refreshDocumentState(textDocument);
+	await refreshDocumentState(textDocument);
 	connection.sendDiagnostics({uri:textDocument.uri, diagnostics:[]});
 	sendStatusClear({uri:textDocument.uri});
 	// And ask the lax fstar process to verify it
-	validateFStarDocument(textDocument, "full", "lax");
+	validateFStarDocument(textDocument, "full", "lax");	
+}
+
+connection.onRequest("fstar-vscode-assistant/restart", (uri : any) => {
+	// console.log("Received restart request with parameters: " + uri);
+	const textDocument = documents.get(uri);
+	onRestartHandler(textDocument);
 });
 
 connection.onRequest("fstar-vscode-assistant/text-doc-changed", (params : any) => {
