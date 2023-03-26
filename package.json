@@ -64,6 +64,18 @@
 					"type": "boolean",
 					"default": true,
 					"description": "Log debugging information to the console."
+				},
+				"fstarVSCodeAssistant.showFlyCheckIcon": {
+					"scope": "resource",
+					"type": "boolean",
+					"default": "true",
+					"description": "Show the 'eye' icon in the gutter to indicate which parts of a documemnt have been flychecked?"
+				},
+				"fstarVSCodeAssistant.showLightCheckIcon": {
+					"scope": "resource",
+					"type": "boolean",
+					"default": "true",
+					"description": "Show the 'question-mark' icon in the gutter to indicate which parts of a documemnt have been only light-checked?"
 				}
 			}
 		},

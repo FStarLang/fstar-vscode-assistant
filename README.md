@@ -35,7 +35,7 @@ There are three forms of checking:
   * Light checking: Where F* checks the basic well-formedness of a program, but
     without proving that it is fully type correct. This form of checking is sufficient
     to detect basic typing errors, e.g., treating an integer as a string. Note, 
-    light checking corresponds to checking a definition with `--admit_smt_queries true`.
+    light checking corresponds to checking a definition with `--lax`.
 
   * Fly checking: Where F* implicitly light-checks the document every time the document changes.
 
@@ -47,14 +47,16 @@ and another for explicit user-triggered checking requests.
 For each line of the document for which the user explicitly requested checking
 F* indicates the checking status with an icon in the gutter on the left of the editor pane.
 
-There are three kinds of gutter icons:
+There are four kinds of gutter icons:
 
-1. A check mark: This line was fully checked
+1. An eye icon: This line was flychecked. You can choose to disable this in the user settings (see below).
 
-2. An hourglass: This line is currently being processed by F*
+2. A check mark: This line was fully checked
 
-3. A question mark: This line was processed by F*, but the user instructed 
-   F* to only light check it.
+3. An hourglass: This line is currently being processed by F* for full checking
+
+4. A question mark: This line was processed by F*, but the user instructed 
+   F* to only light check it. You can choose to disable this in the user settings (see below).
 
 #### Basic Navigation
 
@@ -96,10 +98,14 @@ You can change the following:
 
   * verifyOnOpen: Set this flag to fully check a file when it is opened
 
-  * laxOnChange: You can choose whether or not F* should light-check a document
+  * flyCheck: You can choose whether or not F* should flycheck a document
     at every key stroke.
 
   * debug: Set this flag to have the extension log debug information to the console.
+
+  * showFlyCheckIcon: You can choose to not show the gutter icon when F* has flychecked a fragment
+
+  * showLightCheckIcon: You can choose to not show the gutter icon when F* has only light-checked a fragment
 
 You can also change the keybindings:
 
@@ -157,6 +163,9 @@ for launching `fstar.exe`. Here is a sample .fst.config.json file:
 * The `"options"` field contains the command line options you want to pass to `fstar_exe`
 * The `"include_dirs"` field contains all include directories to pass to `fstar_exe`,
   relative to the workspace root folder.
+
+You can open multiple workspace folders, each with their own config file which applies only 
+to files within that folder.
 
 ## Planned features
 

@@ -50,13 +50,19 @@ interface fstarVSCodeAssistantSettings {
 	verifyOnOpen: boolean;
 	flyCheck: boolean;
 	debug: boolean;
+	showFlyCheckIcon: boolean;
+	showLightCheckIcon: boolean;
 }
 
 interface IDEState {
 	// The main fstar.exe process for verifying the current document
 	fstar_ide: cp.ChildProcess;
+	fstar_ide_process_exited: boolean;
+
 	// The fstar.exe process for quickly handling on-change events, symbol lookup etc
 	fstar_lax_ide: cp.ChildProcess;
+	fstar_lax_ide_process_exited: boolean;
+	
 	// Every query sent to fstar_ide & fstar_lax_ide is assigned a unique id
 	last_query_id: number;
 	// A symbol-info table populated by fstar_lax_ide for onHover and onDefinition requests
@@ -73,7 +79,9 @@ const documentStates: Map<string, IDEState> = new Map();
 let configurationSettings : fstarVSCodeAssistantSettings = {
 	verifyOnOpen: false,
 	flyCheck: true,
-	debug: true
+	debug: true,
+	showFlyCheckIcon: true,
+	showLightCheckIcon: true
 };
 
 ////////////////////////////////////////////////////////////////////////////////////
@@ -162,6 +170,7 @@ interface IdeProofStateGoal {
 // IDEError: fstar.exe sends this message when reporting errors and warnings
 interface IdeError {
 	message: string;
+	number: number;
 	level : 'warning' | 'error' | 'info';
 	ranges: FStarRange[];
 }
@@ -181,7 +190,7 @@ interface IdeProgress {
 // An auto-complete response
 type IdeAutoCompleteResponse = [number, string, string];
 type IdeAutoCompleteResponses = IdeAutoCompleteResponse[];
-type IdeQueryResponseTypes = IdeSymbol | IdeError[] | IdeAutoCompleteResponses;
+type IdeQueryResponseTypes = IdeSymbol | IdeError | IdeError[] | IdeAutoCompleteResponses;
 
 // A query response envelope
 interface IdeQueryResponse {
@@ -246,7 +255,7 @@ interface VfsAdd {
 interface FullBufferQuery {
 	query: 'full-buffer';
 	args:{
-		kind:'full' | 'full-with-symbols' | 'cache' | 'reload-deps' | 'verify-to-position' | 'lax-to-position';
+		kind:'full' | 'lax-with-symbols' | 'cache' | 'reload-deps' | 'verify-to-position' | 'lax-to-position';
 		code:string;
 		line:number;
 		column:number
@@ -314,8 +323,39 @@ function sendRequestForDocument(textDocument : TextDocument, msg:any, lax?:'lax'
 		if (configurationSettings.debug) {
 			console.log(">>> " +text);
 		}
-		proc?.stdin?.write(text);
-		proc?.stdin?.write("\n");
+		if (proc.exitCode != null) {
+			if (lax) {
+				if (doc_state.fstar_lax_ide_process_exited) { return; }
+				doc_state.fstar_lax_ide_process_exited = true;
+				const msg : AlertMessage = {
+					uri: textDocument.uri,
+					message: "ERROR: F* flycheck process exited with code " + proc.exitCode
+				};
+				sendAlert(msg);
+				console.error(msg);
+			}
+			else {
+				if (doc_state.fstar_ide_process_exited) { return; }
+				doc_state.fstar_ide_process_exited = true;
+				const msg : AlertMessage = {
+					uri: textDocument.uri,
+					message: "ERROR: F* checker process exited with code " + proc.exitCode
+				};
+				sendAlert(msg);
+				console.error(msg);
+			}
+			return;
+		}
+		else {
+			try {
+				proc?.stdin?.write(text);
+				proc?.stdin?.write("\n");
+			} catch (e) {
+				const msg = "ERROR: Error writing to F* process: " + e;
+				console.error(msg);
+				sendAlert({uri:textDocument.uri, message:msg});
+			}
+		}
 	}
 }
 
@@ -323,7 +363,7 @@ function sendRequestForDocument(textDocument : TextDocument, msg:any, lax?:'lax'
 // Sending a FullBufferQuery to fstar_ide or fstar_lax_ide
 function validateFStarDocument(textDocument: TextDocument,kind:'full'|'cache'|'reload-deps', lax?:'lax') {
 	// console.log("ValidateFStarDocument( " + textDocument.uri + ", " + kind + ", lax=" + lax + ")");
-	connection.sendDiagnostics({uri:textDocument.uri, diagnostics:[]});
+	sendClearDiagnostics({uri:textDocument.uri});
 	if (!lax) {
 		// If this is non-lax requests, send a status clear messages to VSCode
 		// to clear the gutter icons and error squiggles
@@ -334,7 +374,7 @@ function validateFStarDocument(textDocument: TextDocument,kind:'full'|'cache'|'r
 		}
 		sendStatusClear({uri:textDocument.uri});
 	}
-	const k = kind=="full" && lax ? "full-with-symbols" : kind;
+	const k = kind=="full" && lax ? "lax-with-symbols" : kind;
 	if (supportsFullBuffer) {
 		const push_context : FullBufferQuery = { 
 			query:"full-buffer",
@@ -351,7 +391,7 @@ function validateFStarDocument(textDocument: TextDocument,kind:'full'|'cache'|'r
 
 function validateFStarDocumentToPosition(textDocument: TextDocument,kind:'verify-to-position'|'lax-to-position', position:{line:number, column:number}) {
 	// console.log("ValidateFStarDocumentToPosition( " + textDocument.uri + ", " + kind);
-	connection.sendDiagnostics({uri:textDocument.uri, diagnostics:[]});
+	sendClearDiagnostics({uri:textDocument.uri});
 	// If this is non-lax requests, send a status clear messages to VSCode
 	// to clear the gutter icons and error squiggles
 	// They will be reported again if the document is not verified
@@ -432,6 +472,22 @@ interface StatusFailedMessage {
 	uri: string;
 	ranges: Range []; // A VSCode range, not an FStarRange
 }
+
+// An alert message for a document, sent if the the F* process crashed
+interface AlertMessage {
+	uri: string;
+	message: string;
+}
+
+interface DiagnosticsMessage {
+	uri: string;
+	diagnostics: Diagnostic[];
+}
+
+interface ClearDiagnosticsMessage {
+	uri: string;
+}
+
 ////////////////////////////////////////////////////////////////////////////////////
 // PATH and URI Utilities
 ////////////////////////////////////////////////////////////////////////////////////
@@ -675,6 +731,18 @@ function sendStatusClear (msg: StatusClearMessage) {
 	connection.sendNotification('fstar-vscode-assistant/statusClear', msg);
 }
 
+function sendAlert(msg: AlertMessage) {
+	connection.sendNotification('fstar-vscode-assistant/alert', msg);
+}
+
+function sendDiagnostics(msg: DiagnosticsMessage) {
+	connection.sendNotification('fstar-vscode-assistant/diagnostics', msg);
+}
+
+function sendClearDiagnostics(msg: ClearDiagnosticsMessage) {
+	console.log("+++Sending clear diagnostics");
+	connection.sendNotification('fstar-vscode-assistant/clearDiagnostics', msg);
+}
 
  ///////////////////////////////////////////////////////////////////////////////////
  // Handling responses from the F* IDE protocol
@@ -691,7 +759,7 @@ function sendStatusClear (msg: StatusClearMessage) {
 
 // Main event dispatch for IDE responses
 function handleOneResponseForDocument(textDocument: TextDocument, data:string, lax: boolean) {
-	// console.log("handleOneResponse " + (lax? "lax" : "") + ":<" +data+ ">");
+	console.log("+++handleOneResponse " +data);
 	if (data == "") { return; }
 	let r : IdeResponse;
 	try {
@@ -723,6 +791,7 @@ function handleOneResponseForDocument(textDocument: TextDocument, data:string, l
 				return handleIdeSymbol(textDocument, r.response as IdeSymbol);
 
 			case 'error':
+				console.log("++++Calling handleIdeDiagnostics on " + data);
 				return handleIdeDiagnostics(textDocument, r.response as IdeError[]);
 
 			case 'auto-complete':
@@ -833,6 +902,7 @@ function handleIdeProgress(textDocument: TextDocument, contents : IdeProgress, l
 // If we get errors and warnings from F*, we send them to VSCode
 // as diagnostics, which will show them as squiggles in the editor
 function handleIdeDiagnostics (textDocument : TextDocument, response : IdeError []) {
+	console.log("+++++ handleIdeDiagnostics");
 	function ideErrorLevelAsDiagnosticSeverity (level: string) : DiagnosticSeverity {
 		switch (level) {
 			case "warning": return DiagnosticSeverity.Warning;
@@ -844,20 +914,37 @@ function handleIdeDiagnostics (textDocument : TextDocument, response : IdeError 
 	if (!response || !(Array.isArray(response))) { return; }
 	const diagnostics : Diagnostic[]= [];
 	response.forEach((err) => {
+		let diag : Diagnostic | undefined = undefined;
 		err.ranges.forEach ((rng) => {
-			const diag = {
-				severity: ideErrorLevelAsDiagnosticSeverity(err.level),
-				range: {
-					start: mkPosition(rng.beg),
-					end: mkPosition(rng.end)
-				},
-				message: err.message
-			};
-			diagnostics.push(diag);
+			if (rng.fname == "<input>") {
+				diag = {
+					severity: ideErrorLevelAsDiagnosticSeverity(err.level),
+					range: {
+						start: mkPosition(rng.beg),
+						end: mkPosition(rng.end)
+					},
+					message: err.message
+				};
+			} else if (diag) {
+				const seeAlso = "(See related location: " + rng.fname + ":" + rng.beg[0] + ":" + rng.beg[1] + ")";
+				diag.message = diag.message + "\n" + seeAlso;
+			} else {
+				diag = {
+					severity: ideErrorLevelAsDiagnosticSeverity(err.level),
+					range: {
+						start: mkPosition(rng.beg),
+						end: mkPosition(rng.end)
+					},
+					message: err.message + " (in file " + rng.fname + ")"
+				};
+			}
 		});
+		if (diag) {
+			diagnostics.push(diag);
+		}
 	}); 
-	connection.sendDiagnostics({uri:textDocument.uri, diagnostics: diagnostics});
-
+	console.log("+++Sending diagnostics: " + JSON.stringify(diagnostics));
+	sendDiagnostics({uri:textDocument.uri, diagnostics: diagnostics});
 }
 
 function handleIdeAutoComplete(textDocument : TextDocument, response : IdeAutoCompleteResponses) {
@@ -1032,7 +1119,9 @@ async function refreshDocumentState(textDocument : TextDocument) {
 	// Initialize the document state for this doc
 	documentStates.set(textDocument.uri, { 
 						fstar_ide: fstar_ide,
+						fstar_ide_process_exited: false,
 						fstar_lax_ide: fstar_lax_ide,
+						fstar_lax_ide_process_exited: false,
 						last_query_id: 0,
 						hover_symbol_info: new Map(),
 						hover_proofstate_info: new Map(),
@@ -1078,23 +1167,6 @@ documents.onDidOpen( e => {
 	onOpenHandler(e.document);
 });
 
-// 	const settings = connection.workspace.getConfiguration({
-// 		scopeUri: textDocument.uri,
-// 		section: 'fstarVSCodeAssistant'
-// 	});
-// 	settings.then((s) => {
-// 		console.log("Got settings on open: " + JSON.stringify(settings));
-// 	});
-	
-// 	await refreshDocumentState(textDocument);
-
-// 	// And ask the main fstar process to verify it
-// 	validateFStarDocument(textDocument, "full");
-
-// 	// And ask the lax fstar process to verify it
-// 	validateFStarDocument(textDocument, "full", "lax");
-// });
-
 function killFStarProcessesForDocument(textDocument : TextDocument) {
 	const docState = documentStates.get(textDocument.uri);
 	if (!docState) return;
@@ -1119,6 +1191,7 @@ documents.onDidChangeContent(change => {
 
 documents.onDidSave(change => {
 	validateFStarDocument(change.document, "full");
+	validateFStarDocument(change.document, "full", "lax"); //retain flycheck markers for the suffix
 });
 
 connection.onDidChangeWatchedFiles(_change => {
@@ -1292,10 +1365,10 @@ connection.onDocumentRangeFormatting((formatParams : DocumentRangeFormattingPara
 connection.onRequest("fstar-vscode-assistant/verify-to-position", (params : any) => {
 	const uri = params[0];
 	const position : { line: number, character: number } = params[1];
-	// console.log("Received verify request with parameters: " + uri + " " + JSON.stringify(position));
 	const textDocument = documents.get(uri);
 	if (!textDocument) { return; }
 	validateFStarDocumentToPosition(textDocument, "verify-to-position", {line:position.line + 1, column:position.character});
+	validateFStarDocument(textDocument, "full", "lax"); //also flycheck, so we get status markers beyond the position too
 });
 
 connection.onRequest("fstar-vscode-assistant/lax-to-position", (params : any) => {
@@ -1305,13 +1378,13 @@ connection.onRequest("fstar-vscode-assistant/lax-to-position", (params : any) =>
 	const textDocument = documents.get(uri);
 	if (!textDocument) { return; }
 	validateFStarDocumentToPosition(textDocument, "lax-to-position", {line:position.line + 1, column:position.character});
+	validateFStarDocument(textDocument, "full", "lax"); //also flycheck, so we get status markers beyond the position too
 });
 
 async function onRestartHandler(textDocument?:TextDocument) {
 	if (!textDocument) { return; }
 	killFStarProcessesForDocument(textDocument);
 	await refreshDocumentState(textDocument);
-	connection.sendDiagnostics({uri:textDocument.uri, diagnostics:[]});
 	sendStatusClear({uri:textDocument.uri});
 	// And ask the lax fstar process to verify it
 	validateFStarDocument(textDocument, "full", "lax");	

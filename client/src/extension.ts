@@ -16,6 +16,22 @@ import {
 let client: LanguageClient;
 
 
+interface fstarVSCodeAssistantSettings {
+	verifyOnOpen: boolean;
+	flyCheck: boolean;
+	debug: boolean;
+	showFlyCheckIcon: boolean;
+	showLightCheckIcon: boolean;
+}
+
+let fstarVSCodeAssistantSettings: fstarVSCodeAssistantSettings = {
+	verifyOnOpen: false,
+	flyCheck: true,
+	debug: false,
+	showFlyCheckIcon: true,
+	showLightCheckIcon: true
+};
+
 // This is the check mark icon that will be displayed in the gutter
 const gutterIconOk = vscode.window.createTextEditorDecorationType({
 	gutterIconSize: 'contain',
@@ -49,6 +65,10 @@ const gutterLaxDecorationsMap : Map<string, vscode.Range[]> = new Map<string, vs
 // A map from file URI to the gutter decorations positions for it
 const gutterFlyCheckDecorationsMap : Map<string, vscode.Range[]> = new Map<string, vscode.Range[]>();
 
+// Diagnostics raised by the server for each document
+const diagnosticsMap : Map<string, vscode.Diagnostic[]> = new Map<string, vscode.Diagnostic[]>();
+const diagnosticCollection = vscode.languages.createDiagnosticCollection('fstar-vscode-assistant');
+
 // A background color for text being verified: Not currently used
 const inProgressBackground = vscode.window.createTextEditorDecorationType({
 		backgroundColor: 'rgba(100, 0, 255, 0.5)'
@@ -79,6 +99,20 @@ interface StatusStartedMessage {
 	ranges: vscode.Range [];
 }
 
+interface AlertMessage {
+	uri: string;
+	message: string;
+}
+
+interface DiagnosticsMessage {
+	uri: string;
+	diagnostics: vscode.Diagnostic [];
+}
+
+interface ClearDiagnosticsMessage {
+	uri: string;
+}
+
 // This function is called when the active editor changes or when a status message is received
 // We set the gutter decorations for the document in the new active editor
 // if the URI matches the URI of the document in the new active editor
@@ -87,9 +121,14 @@ function setActiveEditorDecorationsIfUriMatches(uri: string) {
 	if (!editor) {	return; }
 	if (editor.document.uri.toString() === uri) {
 		const currentDecorations = gutterOkDecorationsMap.get(uri) ?? [];
-		editor.setDecorations(gutterIconEye, gutterFlyCheckDecorationsMap.get(uri) ?? []);
+		if (fstarVSCodeAssistantSettings.showFlyCheckIcon) {
+			editor.setDecorations(gutterIconEye, gutterFlyCheckDecorationsMap.get(uri) ?? []);
+		}
 		editor.setDecorations(gutterIconOk, currentDecorations);
-		editor.setDecorations(gutterIconLax, gutterLaxDecorationsMap.get(uri) ?? []);
+		if (fstarVSCodeAssistantSettings.showLightCheckIcon) {
+			editor.setDecorations(gutterIconLax, gutterLaxDecorationsMap.get(uri) ?? []);
+		}
+		// Here's how you would set a background color for a region of text
 		// editor.setDecorations(inProgressBackground, backgroundColorDecorationMap.get(uri) ?? []);
 		editor.setDecorations(gutterIconHourglass, proofInProgressDecorationMap.get(uri) ?? []);
 	}
@@ -149,7 +188,38 @@ function handleStatusClear (msg: StatusClearMessage): void {
 	gutterOkDecorationsMap.set(msg.uri, []);
 	gutterLaxDecorationsMap.set(msg.uri, []);
 	gutterFlyCheckDecorationsMap.set(msg.uri, []);
+	diagnosticsMap.set(msg.uri, []);
+	const uri = vscode.Uri.parse(msg.uri);
+	diagnosticCollection.set(uri, []);
 	setActiveEditorDecorationsIfUriMatches(msg.uri);
+}
+
+// This function is called by the server in case F* crashed or was killed
+function handleAlert(msg: AlertMessage) {
+	vscode.window.showErrorMessage(msg.message + "\n On document: " + msg.uri);
+}
+
+function handleDiagnostics(msg: DiagnosticsMessage) {
+	const docDiagnostics = diagnosticsMap.get(msg.uri) ?? [];
+	function docContainsDiagnostic(diag: vscode.Diagnostic) {
+		return docDiagnostics.some(d => d.range.isEqual(diag.range) && d.message === diag.message);
+	}
+	// De-duplicate diagnostics, because we may get diagnostics from multiple sources
+	// both the fstar_ide and fstar_lax_ide servers may send diagnostics
+	msg.diagnostics.forEach(diag => {
+		if (!docContainsDiagnostic(diag)) {
+			docDiagnostics.push(diag);
+		}
+	});
+	diagnosticsMap.set(msg.uri, docDiagnostics);
+	const uri = vscode.Uri.parse(msg.uri);
+	diagnosticCollection.set(uri, docDiagnostics);
+}
+
+function handleClearDiagnostics(msg : ClearDiagnosticsMessage) {
+	diagnosticsMap.set(msg.uri, []);
+	const uri = vscode.Uri.parse(msg.uri);
+	diagnosticCollection.set(uri, []);
 }
 
 // A client-only handler for a active editor changed raised by the editor
@@ -198,6 +268,9 @@ export function activate(context: ExtensionContext) {
 		client.onNotification('fstar-vscode-assistant/statusClear', handleStatusClear);
 		client.onNotification('fstar-vscode-assistant/statusStarted', handleStatusStarted);
 		client.onNotification('fstar-vscode-assistant/statusFailed', handleStatusFailed);
+		client.onNotification('fstar-vscode-assistant/alert', handleAlert);
+		client.onNotification('fstar-vscode-assistant/diagnostics', handleDiagnostics);
+		client.onNotification('fstar-vscode-assistant/clearDiagnostics', handleClearDiagnostics);
 	});
 	vscode.window.onDidChangeActiveTextEditor(handleDidChangeActiveEditor);
 
@@ -247,9 +320,20 @@ export function activate(context: ExtensionContext) {
 		}
 	});
 
+	workspace.onDidChangeConfiguration((event) => {
+		const cfg = workspace.getConfiguration('fstarVSCodeAssistant');
+		fstarVSCodeAssistantSettings = {
+			verifyOnOpen: cfg.get('verifyOnOpen', fstarVSCodeAssistantSettings.verifyOnOpen),
+			flyCheck: cfg.get('flyCheck', fstarVSCodeAssistantSettings.flyCheck),
+			debug: cfg.get('debug', fstarVSCodeAssistantSettings.debug),
+			showFlyCheckIcon: cfg.get('showFlyCheckIcon', fstarVSCodeAssistantSettings.showFlyCheckIcon),
+			showLightCheckIcon: cfg.get('showLightCheckIcon', fstarVSCodeAssistantSettings.showLightCheckIcon),
+		};
+	});
+
 	// Start the client. This will also launch the server
 	context.subscriptions.push(client.start());
-	const settings = workspace.getConfiguration('fstarVSCodeAssistant');
+
 }
 
 export function deactivate(): Thenable<void> | undefined {
