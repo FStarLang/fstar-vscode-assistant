@@ -79,7 +79,7 @@ const documentStates: Map<string, IDEState> = new Map();
 let configurationSettings : fstarVSCodeAssistantSettings = {
 	verifyOnOpen: false,
 	flyCheck: true,
-	debug: true,
+	debug: false,
 	showFlyCheckIcon: true,
 	showLightCheckIcon: true
 };
@@ -740,7 +740,7 @@ function sendDiagnostics(msg: DiagnosticsMessage) {
 }
 
 function sendClearDiagnostics(msg: ClearDiagnosticsMessage) {
-	console.log("+++Sending clear diagnostics");
+
 	connection.sendNotification('fstar-vscode-assistant/clearDiagnostics', msg);
 }
 
@@ -759,7 +759,6 @@ function sendClearDiagnostics(msg: ClearDiagnosticsMessage) {
 
 // Main event dispatch for IDE responses
 function handleOneResponseForDocument(textDocument: TextDocument, data:string, lax: boolean) {
-	console.log("+++handleOneResponse " +data);
 	if (data == "") { return; }
 	let r : IdeResponse;
 	try {
@@ -791,7 +790,6 @@ function handleOneResponseForDocument(textDocument: TextDocument, data:string, l
 				return handleIdeSymbol(textDocument, r.response as IdeSymbol);
 
 			case 'error':
-				console.log("++++Calling handleIdeDiagnostics on " + data);
 				return handleIdeDiagnostics(textDocument, r.response as IdeError[]);
 
 			case 'auto-complete':
@@ -902,7 +900,6 @@ function handleIdeProgress(textDocument: TextDocument, contents : IdeProgress, l
 // If we get errors and warnings from F*, we send them to VSCode
 // as diagnostics, which will show them as squiggles in the editor
 function handleIdeDiagnostics (textDocument : TextDocument, response : IdeError []) {
-	console.log("+++++ handleIdeDiagnostics");
 	function ideErrorLevelAsDiagnosticSeverity (level: string) : DiagnosticSeverity {
 		switch (level) {
 			case "warning": return DiagnosticSeverity.Warning;
@@ -943,7 +940,6 @@ function handleIdeDiagnostics (textDocument : TextDocument, response : IdeError 
 			diagnostics.push(diag);
 		}
 	}); 
-	console.log("+++Sending diagnostics: " + JSON.stringify(diagnostics));
 	sendDiagnostics({uri:textDocument.uri, diagnostics: diagnostics});
 }
 
