@@ -913,27 +913,23 @@ function handleIdeDiagnostics (textDocument : TextDocument, response : IdeError 
 	response.forEach((err) => {
 		let diag : Diagnostic | undefined = undefined;
 		err.ranges.forEach ((rng) => {
-			if (rng.fname == "<input>") {
+			if (!diag) {
+				// First range for this error, construct the diagnostic message.
+				let maybe_fname = "";
+				if (rng.fname != "<input>")
+					maybe_fname = " (in file " + rng.fname + ")";
 				diag = {
 					severity: ideErrorLevelAsDiagnosticSeverity(err.level),
 					range: {
 						start: mkPosition(rng.beg),
 						end: mkPosition(rng.end)
 					},
-					message: err.message
+					message: err.message + maybe_fname
 				};
 			} else if (diag) {
+				// More ranges, just accumulate them into the message.
 				const seeAlso = "(See related location: " + rng.fname + ":" + rng.beg[0] + ":" + rng.beg[1] + ")";
 				diag.message = diag.message + "\n" + seeAlso;
-			} else {
-				diag = {
-					severity: ideErrorLevelAsDiagnosticSeverity(err.level),
-					range: {
-						start: mkPosition(rng.beg),
-						end: mkPosition(rng.end)
-					},
-					message: err.message + " (in file " + rng.fname + ")"
-				};
 			}
 		});
 		if (diag) {
