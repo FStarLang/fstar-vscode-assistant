@@ -48,6 +48,7 @@ import { pathToFileURL } from 'url';
 
 interface fstarVSCodeAssistantSettings {
 	verifyOnOpen: boolean;
+	verifyOnSave: boolean;
 	flyCheck: boolean;
 	debug: boolean;
 	showFlyCheckIcon: boolean;
@@ -78,6 +79,7 @@ interface IDEState {
 const documentStates: Map<string, IDEState> = new Map();
 let configurationSettings : fstarVSCodeAssistantSettings = {
 	verifyOnOpen: false,
+	verifyOnSave: true,
 	flyCheck: true,
 	debug: false,
 	showFlyCheckIcon: true,
@@ -922,27 +924,23 @@ function handleIdeDiagnostics (textDocument : TextDocument, response : IdeError 
 	response.forEach((err) => {
 		let diag : Diagnostic | undefined = undefined;
 		err.ranges.forEach ((rng) => {
-			if (rng.fname == "<input>") {
+			if (!diag) {
+				// First range for this error, construct the diagnostic message.
+				let maybe_fname = "";
+				if (rng.fname != "<input>")
+					maybe_fname = " (in file " + rng.fname + ")";
 				diag = {
 					severity: ideErrorLevelAsDiagnosticSeverity(err.level),
 					range: {
 						start: mkPosition(rng.beg),
 						end: mkPosition(rng.end)
 					},
-					message: err.message
+					message: err.message + maybe_fname
 				};
 			} else if (diag) {
+				// More ranges, just accumulate them into the message.
 				const seeAlso = "(See related location: " + rng.fname + ":" + rng.beg[0] + ":" + rng.beg[1] + ")";
 				diag.message = diag.message + "\n" + seeAlso;
-			} else {
-				diag = {
-					severity: ideErrorLevelAsDiagnosticSeverity(err.level),
-					range: {
-						start: mkPosition(rng.beg),
-						end: mkPosition(rng.end)
-					},
-					message: err.message + " (in file " + rng.fname + ")"
-				};
 			}
 			if (err.number == 128) { //Error 128 is unable to load dependences
 				sendAlert({message:err.message, uri: textDocument.uri});
@@ -1198,8 +1196,10 @@ documents.onDidChangeContent(change => {
 });
 
 documents.onDidSave(change => {
-	validateFStarDocument(change.document, "full");
-	validateFStarDocument(change.document, "full", "lax"); //retain flycheck markers for the suffix
+	if (configurationSettings.verifyOnSave) {
+		validateFStarDocument(change.document, "full");
+		validateFStarDocument(change.document, "full", "lax"); //retain flycheck markers for the suffix
+	}
 });
 
 connection.onDidChangeWatchedFiles(_change => {

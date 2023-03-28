@@ -18,6 +18,7 @@ let client: LanguageClient;
 
 interface fstarVSCodeAssistantSettings {
 	verifyOnOpen: boolean;
+	verifyOnSave: boolean;
 	flyCheck: boolean;
 	debug: boolean;
 	showFlyCheckIcon: boolean;
@@ -26,6 +27,7 @@ interface fstarVSCodeAssistantSettings {
 
 let fstarVSCodeAssistantSettings: fstarVSCodeAssistantSettings = {
 	verifyOnOpen: false,
+	verifyOnSave: true,
 	flyCheck: true,
 	debug: false,
 	showFlyCheckIcon: true,
@@ -331,6 +333,7 @@ export function activate(context: ExtensionContext) {
 		const cfg = workspace.getConfiguration('fstarVSCodeAssistant');
 		fstarVSCodeAssistantSettings = {
 			verifyOnOpen: cfg.get('verifyOnOpen', fstarVSCodeAssistantSettings.verifyOnOpen),
+			verifyOnSave: cfg.get('verifyOnSave', fstarVSCodeAssistantSettings.verifyOnSave),
 			flyCheck: cfg.get('flyCheck', fstarVSCodeAssistantSettings.flyCheck),
 			debug: cfg.get('debug', fstarVSCodeAssistantSettings.debug),
 			showFlyCheckIcon: cfg.get('showFlyCheckIcon', fstarVSCodeAssistantSettings.showFlyCheckIcon),

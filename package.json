@@ -3,7 +3,7 @@
 	"description": "An interactive editing mode for F*",
 	"author": "Microsoft Corporation",
 	"license": "MIT",
-	"version": "0.1.1",
+	"version": "0.2.0",
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/FStarLang/fstar-vscode-assistant"
@@ -52,6 +52,12 @@
 					"type": "boolean",
 					"default": false,
 					"description": "Should a document be checked fully when it is opened?"
+				},
+				"fstarVSCodeAssistant.verifyOnSave": {
+					"scope": "resource",
+					"type": "boolean",
+					"default": true,
+					"description": "Should a document be checked fully whenever it is saved?"
 				},
 				"fstarVSCodeAssistant.flyCheck": {
 					"scope": "resource",
