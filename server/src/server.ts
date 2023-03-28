@@ -48,6 +48,7 @@ import { pathToFileURL } from 'url';
 
 interface fstarVSCodeAssistantSettings {
 	verifyOnOpen: boolean;
+	verifyOnSave: boolean;
 	flyCheck: boolean;
 	debug: boolean;
 	showFlyCheckIcon: boolean;
@@ -78,6 +79,7 @@ interface IDEState {
 const documentStates: Map<string, IDEState> = new Map();
 let configurationSettings : fstarVSCodeAssistantSettings = {
 	verifyOnOpen: false,
+	verifyOnSave: true,
 	flyCheck: true,
 	debug: false,
 	showFlyCheckIcon: true,
@@ -1182,8 +1184,10 @@ documents.onDidChangeContent(change => {
 });
 
 documents.onDidSave(change => {
-	validateFStarDocument(change.document, "full");
-	validateFStarDocument(change.document, "full", "lax"); //retain flycheck markers for the suffix
+	if (configurationSettings.verifyOnSave) {
+		validateFStarDocument(change.document, "full");
+		validateFStarDocument(change.document, "full", "lax"); //retain flycheck markers for the suffix
+	}
 });
 
 connection.onDidChangeWatchedFiles(_change => {

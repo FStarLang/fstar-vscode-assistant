@@ -53,6 +53,12 @@
 					"default": false,
 					"description": "Should a document be checked fully when it is opened?"
 				},
+				"fstarVSCodeAssistant.verifyOnSave": {
+					"scope": "resource",
+					"type": "boolean",
+					"default": true,
+					"description": "Should a document be checked fully whenever it is saved?"
+				},
 				"fstarVSCodeAssistant.flyCheck": {
 					"scope": "resource",
 					"type": "boolean",
