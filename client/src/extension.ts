@@ -201,8 +201,15 @@ function handleAlert(msg: AlertMessage) {
 
 function handleDiagnostics(msg: DiagnosticsMessage) {
 	const docDiagnostics = diagnosticsMap.get(msg.uri) ?? [];
+	function rangeEquals(r1: vscode.Range, r2: vscode.Range) {
+		return (
+			r1.start.line == r2.start.line &&
+			r1.start.character == r2.start.character &&
+			r1.end.line == r2.end.line && r1.end.character == r2.end.character
+			);
+	}
 	function docContainsDiagnostic(diag: vscode.Diagnostic) {
-		return docDiagnostics.some(d => d.range.isEqual(diag.range) && d.message === diag.message);
+		return docDiagnostics.some(d => rangeEquals(d.range, diag.range) && d.message === diag.message);
 	}
 	// De-duplicate diagnostics, because we may get diagnostics from multiple sources
 	// both the fstar_ide and fstar_lax_ide servers may send diagnostics

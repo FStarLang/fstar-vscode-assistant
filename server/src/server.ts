@@ -197,7 +197,7 @@ interface IdeQueryResponse {
 	'query-id': string;
 	kind: 'protocol-info' | 'response' | 'message';
 	status?: 'success' | 'failure';
-	level?: 'progress' | 'proof-state';
+	level?: 'progress' | 'proof-state' | 'info';
 	response?: IdeQueryResponseTypes;
 	contents?: IdeProofState | IdeSymbol | IdeProgress;
 }
@@ -779,12 +779,13 @@ function handleOneResponseForDocument(textDocument: TextDocument, data:string, l
 		if (!r.contents) { return; }
 		return handleIdeProofState(textDocument, r.contents as IdeProofState);
 	}
-	else if (r.kind == "response" && r.status == "failure") {
-		if (!r.response) { return; }
-		return handleIdeDiagnostics(textDocument, r.response as IdeError[]);
-	}
-	else if (r.kind == "response" && r.status == "success") { 
-		if (!r.response) { return; }
+	else if (r.kind == "response") {
+		if (!r.response) {
+			if (configurationSettings.debug) {
+				console.log("Unexpected response: " + JSON.stringify(r));
+			}
+			return;
+		}
 		switch (decideIdeReponseType(r.response)) {
 			case 'symbol':
 				return handleIdeSymbol(textDocument, r.response as IdeSymbol);
@@ -794,6 +795,11 @@ function handleOneResponseForDocument(textDocument: TextDocument, data:string, l
 
 			case 'auto-complete':
 				return handleIdeAutoComplete(textDocument, r.response as IdeAutoCompleteResponses);
+		}
+	}
+	else if (r.kind == "message" && r.level == "info") {
+		if (configurationSettings.debug) {
+			console.log("Info: " + r.contents);
 		}
 	}
 	else {
@@ -908,7 +914,10 @@ function handleIdeDiagnostics (textDocument : TextDocument, response : IdeError 
 			default: return DiagnosticSeverity.Error;
 		}
 	}
-	if (!response || !(Array.isArray(response))) { return; }
+	if (!response || !(Array.isArray(response))) {
+		sendAlert({message:"Got invalid response to ide diagnostics request: " + JSON.stringify(response), uri: textDocument.uri});
+		return;
+	}
 	const diagnostics : Diagnostic[]= [];
 	response.forEach((err) => {
 		let diag : Diagnostic | undefined = undefined;
@@ -934,6 +943,9 @@ function handleIdeDiagnostics (textDocument : TextDocument, response : IdeError 
 					},
 					message: err.message + " (in file " + rng.fname + ")"
 				};
+			}
+			if (err.number == 128) { //Error 128 is unable to load dependences
+				sendAlert({message:err.message, uri: textDocument.uri});
 			}
 		});
 		if (diag) {
