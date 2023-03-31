@@ -94,10 +94,10 @@ let configurationSettings : fstarVSCodeAssistantSettings = {
 
 // The type of an .fst.config.json file
 interface FStarConfig {
-	include_dirs:string []; // --include paths
-	options:string [];      // other options to be passed to fstar.exe
-	fstar_exe:string;       // path to fstar.exe
-	cwd: string;            // working directory for fstar.exe (usually not specified; defaults to workspace root)
+	include_dirs?:string []; // --include paths
+	options?:string [];      // other options to be passed to fstar.exe
+	fstar_exe?:string;       // path to fstar.exe
+	cwd?: string;            // working directory for fstar.exe (usually not specified; defaults to workspace root)
 }
 
 // All the open workspace folders
@@ -1106,9 +1106,18 @@ async function refreshDocumentState(textDocument : TextDocument) {
 	const filePath = URI.parse(textDocument.uri);
 	const filename = path.basename(filePath.fsPath);
 	const options = ["--ide", filename];
-	fstarConfig.options.forEach((opt) => { options.push(opt); });
-	fstarConfig.include_dirs.forEach((dir) => { options.push("--include"); options.push(dir); });
-
+	if (fstarConfig.options) {
+		fstarConfig.options.forEach((opt) => { options.push(opt); });
+	}
+	if (fstarConfig.include_dirs) {
+		fstarConfig.include_dirs.forEach((dir) => { options.push("--include"); options.push(dir); });
+	}
+	if (!fstarConfig.fstar_exe) {
+		fstarConfig.fstar_exe = "fstar.exe";
+	}
+	if (!fstarConfig.cwd) {
+		fstarConfig.cwd = path.dirname(filePath.fsPath);
+	}
 	if (configurationSettings.debug) {
 		console.log("Spawning fstar with options: " +options);
 	}
@@ -1358,7 +1367,7 @@ connection.onDocumentRangeFormatting((formatParams : DocumentRangeFormattingPara
 		}
 	};
 	const fstarFormatter =
-		cp.spawnSync(fstarConfig.fstar_exe, 
+		cp.spawnSync(fstarConfig.fstar_exe ? fstarConfig.fstar_exe : "fstar.exe", 
 						["--ide", "prims.fst"], 
 						{input: JSON.stringify(format_query)});
 	const data = fstarFormatter.stdout.toString();
