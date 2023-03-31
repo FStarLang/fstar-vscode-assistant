@@ -42,6 +42,8 @@ import path = require('path');
 import * as fs from 'fs';
 import { pathToFileURL } from 'url';
 
+import * as crypto from 'crypto';
+
 ////////////////////////////////////////////////////////////////////////////////////
 // The state of the LSP server
 ////////////////////////////////////////////////////////////////////////////////////
@@ -178,7 +180,7 @@ interface IdeError {
 }
 
 interface IdeCodeFragment {
-	code: string;
+	"code-digest": string;
 	range: FStarRange;
 }
 
@@ -859,10 +861,13 @@ function handleIdeProgress(textDocument: TextDocument, contents : IdeProgress, l
 		if (!contents["code-fragment"]) { return; }
 		const code_fragment = contents["code-fragment"];
 		const currentText = textDocument.getText(fstarRangeAsRange(code_fragment.range));
-		const okText = code_fragment.code;
-		if (currentText.trim() != okText.trim()) { 
+		// compute an MD5 digest of currentText.trim
+		const md5 = crypto.createHash('md5');
+		md5.update(currentText.trim());
+		const digest = md5.digest('hex');
+		if (digest!= code_fragment['code-digest']) {
 			if (configurationSettings.debug) {
-				console.log("Not setting gutter ok icon: Expected text: <\n" + okText + "\n> but got: <\n" + currentText + "\n>");
+				console.log("Not setting gutter ok icon: Digest mismatch at range " + JSON.stringify(rng));
 			}
 			doc_state.prefix_stale = true;
 			return;
