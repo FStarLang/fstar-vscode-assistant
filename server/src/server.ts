@@ -61,10 +61,12 @@ interface IDEState {
 	// The main fstar.exe process for verifying the current document
 	fstar_ide: cp.ChildProcess;
 	fstar_ide_process_exited: boolean;
+	fstar_ide_diagnostics: Diagnostic[];
 
 	// The fstar.exe process for quickly handling on-change events, symbol lookup etc
 	fstar_lax_ide: cp.ChildProcess;
 	fstar_lax_ide_process_exited: boolean;
+	fstar_lax_ide_diagnostics: Diagnostic[];
 	
 	// Every query sent to fstar_ide & fstar_lax_ide is assigned a unique id
 	last_query_id: number;
@@ -185,7 +187,12 @@ interface IdeCodeFragment {
 }
 
 interface IdeProgress {
-	stage: 'full-buffer-fragment-ok' | 'full-buffer-fragment-lax-ok' | 'full-buffer-fragment-started';
+	stage: 'full-buffer-started'
+		| 'full-buffer-fragment-started'
+		| 'full-buffer-fragment-ok'
+		| 'full-buffer-fragment-lax-ok'
+		| 'full-buffer-fragment-failed'
+		| 'full-buffer-finished';
 	ranges: FStarRange;
 	"code-fragment"?: IdeCodeFragment
 }
@@ -259,7 +266,8 @@ interface VfsAdd {
 interface FullBufferQuery {
 	query: 'full-buffer';
 	args:{
-		kind:'full' | 'lax-with-symbols' | 'cache' | 'reload-deps' | 'verify-to-position' | 'lax-to-position';
+		kind:'full' | 'lax' | 'cache' | 'reload-deps' | 'verify-to-position' | 'lax-to-position';
+		"with-symbols"?: boolean;
 		code:string;
 		line:number;
 		column:number
@@ -365,7 +373,7 @@ function sendRequestForDocument(textDocument : TextDocument, msg:any, lax?:'lax'
 
 
 // Sending a FullBufferQuery to fstar_ide or fstar_lax_ide
-function validateFStarDocument(textDocument: TextDocument,kind:'full'|'cache'|'reload-deps', lax?:'lax') {
+function validateFStarDocument(textDocument: TextDocument,kind:'full'|'lax'|'cache'|'reload-deps', withSymbols:boolean, lax?:'lax') {
 	// console.log("ValidateFStarDocument( " + textDocument.uri + ", " + kind + ", lax=" + lax + ")");
 	sendClearDiagnostics({uri:textDocument.uri});
 	if (!lax) {
@@ -378,12 +386,12 @@ function validateFStarDocument(textDocument: TextDocument,kind:'full'|'cache'|'r
 		}
 		sendStatusClear({uri:textDocument.uri});
 	}
-	const k = kind=="full" && lax ? "lax-with-symbols" : kind;
 	if (supportsFullBuffer) {
 		const push_context : FullBufferQuery = { 
 			query:"full-buffer",
 			args:{
-				kind:k,
+				kind,
+				"with-symbols":withSymbols ? true : false,
 				code:textDocument.getText(),
 				line:0,
 				column:0
@@ -485,6 +493,7 @@ interface AlertMessage {
 
 interface DiagnosticsMessage {
 	uri: string;
+	lax: boolean;
 	diagnostics: Diagnostic[];
 }
 
@@ -776,7 +785,6 @@ function handleOneResponseForDocument(textDocument: TextDocument, data:string, l
 		return handleIdeProtocolInfo(textDocument, r as ProtocolInfo);
 	}
 	else if (r.kind == "message" && r.level == "progress") {
-		//Discard progress messages from fstar_lax_ide
 		return handleIdeProgress(textDocument, r.contents as IdeProgress, lax);
 	}
 	else if (r.kind == "message" && r.level == "proof-state") {
@@ -795,7 +803,7 @@ function handleOneResponseForDocument(textDocument: TextDocument, data:string, l
 				return handleIdeSymbol(textDocument, r.response as IdeSymbol);
 
 			case 'error':
-				return handleIdeDiagnostics(textDocument, r.response as IdeError[]);
+				return handleIdeDiagnostics(textDocument, r.response as IdeError[], lax);
 
 			case 'auto-complete':
 				return handleIdeAutoComplete(textDocument, r.response as IdeAutoCompleteResponses);
@@ -854,6 +862,32 @@ function handleIdeProofState (textDocument: TextDocument, response : IdeProofSta
 function handleIdeProgress(textDocument: TextDocument, contents : IdeProgress, lax:boolean) {
 	const doc_state = documentStates.get(textDocument.uri);
 	if (!doc_state) { return; }
+	if (contents.stage == "full-buffer-started") {
+		if (lax) {
+			doc_state.fstar_lax_ide_diagnostics = [];
+		}
+		else {
+			doc_state.fstar_ide_diagnostics = [];
+		}
+		return;
+	}
+	if (contents.stage == "full-buffer-finished") {
+		if (lax) {
+			sendDiagnostics({
+				uri: textDocument.uri,
+				lax:true,
+				diagnostics: doc_state.fstar_lax_ide_diagnostics
+			});
+		}
+		else {
+			sendDiagnostics({
+				uri: textDocument.uri,
+				lax:false,
+				diagnostics: doc_state.fstar_ide_diagnostics
+			});
+		}
+		return;
+	}
 	if (contents.stage == "full-buffer-fragment-ok" ||
 		contents.stage == "full-buffer-fragment-lax-ok") {
 		if (doc_state.prefix_stale) { return; }
@@ -912,7 +946,7 @@ function handleIdeProgress(textDocument: TextDocument, contents : IdeProgress, l
 
 // If we get errors and warnings from F*, we send them to VSCode
 // as diagnostics, which will show them as squiggles in the editor
-function handleIdeDiagnostics (textDocument : TextDocument, response : IdeError []) {
+function handleIdeDiagnostics (textDocument : TextDocument, response : IdeError [], lax:boolean) {
 	function ideErrorLevelAsDiagnosticSeverity (level: string) : DiagnosticSeverity {
 		switch (level) {
 			case "warning": return DiagnosticSeverity.Warning;
@@ -954,8 +988,15 @@ function handleIdeDiagnostics (textDocument : TextDocument, response : IdeError 
 		if (diag) {
 			diagnostics.push(diag);
 		}
-	}); 
-	sendDiagnostics({uri:textDocument.uri, diagnostics: diagnostics});
+	});
+	const docState = documentStates.get(textDocument.uri);
+	if (!docState) { return; }
+	if (lax) {
+		docState.fstar_lax_ide_diagnostics = docState.fstar_lax_ide_diagnostics.concat(diagnostics);
+	}
+	else {
+		docState.fstar_ide_diagnostics = docState.fstar_ide_diagnostics.concat(diagnostics);
+	}
 }
 
 function handleIdeAutoComplete(textDocument : TextDocument, response : IdeAutoCompleteResponses) {
@@ -1140,8 +1181,10 @@ async function refreshDocumentState(textDocument : TextDocument) {
 	documentStates.set(textDocument.uri, { 
 						fstar_ide: fstar_ide,
 						fstar_ide_process_exited: false,
+						fstar_ide_diagnostics: [],
 						fstar_lax_ide: fstar_lax_ide,
 						fstar_lax_ide_process_exited: false,
+						fstar_lax_ide_diagnostics: [],
 						last_query_id: 0,
 						hover_symbol_info: new Map(),
 						hover_proofstate_info: new Map(),
@@ -1171,11 +1214,11 @@ async function onOpenHandler(textDocument : TextDocument) {
 
 	// And ask the main fstar process to verify it
 	if (configurationSettings.verifyOnOpen) {
-		validateFStarDocument(textDocument, "full");
+		validateFStarDocument(textDocument, "full", false);
 	}
 
 	// And ask the lax fstar process to verify it
-	validateFStarDocument(textDocument, "full", "lax");
+	validateFStarDocument(textDocument, "lax", true, "lax");
 }
 
 // The main entry point when a document is opened
@@ -1200,19 +1243,32 @@ documents.onDidClose(e => {
 	killFStarProcessesForDocument(e.document);
 });
 
+
+let pendingChangeEvents : TextDocument[] = [];
+// We don't want to send too many requests to fstar.exe, so we batch them up
+// and send only the most recent one every 1 second
+setInterval(() => {
+	if (pendingChangeEvents.length > 0) {
+		const doc = pendingChangeEvents.pop();
+		if (!doc) return;
+		pendingChangeEvents = [];
+		if (configurationSettings.flyCheck) {
+			validateFStarDocument(doc, "lax", false, "lax");
+		}
+		validateFStarDocument(doc, "cache", false);	
+	}
+}, 1000);
+
 // The content of a text document has changed. This event is emitted
 // when the text document first opened or when its content has changed.
 documents.onDidChangeContent(change => {
-	if (configurationSettings.flyCheck) {
-		validateFStarDocument(change.document, "full", 'lax');
-	}
-	validateFStarDocument(change.document, "cache");
+	pendingChangeEvents.push(change.document);
 });
 
 documents.onDidSave(change => {
 	if (configurationSettings.verifyOnSave) {
-		validateFStarDocument(change.document, "full");
-		validateFStarDocument(change.document, "full", "lax"); //retain flycheck markers for the suffix
+		validateFStarDocument(change.document, "full", false);
+		validateFStarDocument(change.document, "lax", true, "lax"); //retain flycheck markers for the suffix
 	}
 });
 
@@ -1390,7 +1446,7 @@ connection.onRequest("fstar-vscode-assistant/verify-to-position", (params : any)
 	const textDocument = documents.get(uri);
 	if (!textDocument) { return; }
 	validateFStarDocumentToPosition(textDocument, "verify-to-position", {line:position.line + 1, column:position.character});
-	validateFStarDocument(textDocument, "full", "lax"); //also flycheck, so we get status markers beyond the position too
+	validateFStarDocument(textDocument, "lax", false, "lax"); //also flycheck, so we get status markers beyond the position too
 });
 
 connection.onRequest("fstar-vscode-assistant/lax-to-position", (params : any) => {
@@ -1400,7 +1456,7 @@ connection.onRequest("fstar-vscode-assistant/lax-to-position", (params : any) =>
 	const textDocument = documents.get(uri);
 	if (!textDocument) { return; }
 	validateFStarDocumentToPosition(textDocument, "lax-to-position", {line:position.line + 1, column:position.character});
-	validateFStarDocument(textDocument, "full", "lax"); //also flycheck, so we get status markers beyond the position too
+	validateFStarDocument(textDocument, "lax", false, "lax"); //also flycheck, so we get status markers beyond the position too
 });
 
 async function onRestartHandler(textDocument?:TextDocument) {
@@ -1409,7 +1465,7 @@ async function onRestartHandler(textDocument?:TextDocument) {
 	await refreshDocumentState(textDocument);
 	sendStatusClear({uri:textDocument.uri});
 	// And ask the lax fstar process to verify it
-	validateFStarDocument(textDocument, "full", "lax");	
+	validateFStarDocument(textDocument, "lax", false, "lax");	
 }
 
 connection.onRequest("fstar-vscode-assistant/restart", (uri : any) => {

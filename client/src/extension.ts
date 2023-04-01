@@ -68,7 +68,11 @@ const gutterLaxDecorationsMap : Map<string, vscode.Range[]> = new Map<string, vs
 const gutterFlyCheckDecorationsMap : Map<string, vscode.Range[]> = new Map<string, vscode.Range[]>();
 
 // Diagnostics raised by the server for each document
-const diagnosticsMap : Map<string, vscode.Diagnostic[]> = new Map<string, vscode.Diagnostic[]>();
+interface DocDiagnostics {
+	lax_diagnostics: vscode.Diagnostic [];
+	full_diagnostics: vscode.Diagnostic [];
+}
+const diagnosticsMap : Map<string, DocDiagnostics> = new Map<string, DocDiagnostics>();
 const diagnosticCollection = vscode.languages.createDiagnosticCollection('fstar-vscode-assistant');
 
 // A background color for text being verified: Not currently used
@@ -108,6 +112,7 @@ interface AlertMessage {
 
 interface DiagnosticsMessage {
 	uri: string;
+	lax: boolean;
 	diagnostics: vscode.Diagnostic [];
 }
 
@@ -190,7 +195,7 @@ function handleStatusClear (msg: StatusClearMessage): void {
 	gutterOkDecorationsMap.set(msg.uri, []);
 	gutterLaxDecorationsMap.set(msg.uri, []);
 	gutterFlyCheckDecorationsMap.set(msg.uri, []);
-	diagnosticsMap.set(msg.uri, []);
+	diagnosticsMap.set(msg.uri, { lax_diagnostics: [], full_diagnostics: [] });
 	const uri = vscode.Uri.parse(msg.uri);
 	diagnosticCollection.set(uri, []);
 	setActiveEditorDecorationsIfUriMatches(msg.uri);
@@ -202,7 +207,16 @@ function handleAlert(msg: AlertMessage) {
 }
 
 function handleDiagnostics(msg: DiagnosticsMessage) {
-	const docDiagnostics = diagnosticsMap.get(msg.uri) ?? [];
+	const docDiagnostics : DocDiagnostics =
+		diagnosticsMap.get(msg.uri) ?? { lax_diagnostics: [], full_diagnostics: [] };
+	if (msg.lax) {
+		docDiagnostics.lax_diagnostics = msg.diagnostics;
+	}
+	else {
+		docDiagnostics.full_diagnostics = msg.diagnostics;
+	}
+	diagnosticsMap.set(msg.uri, docDiagnostics);
+	const all_diags = docDiagnostics.lax_diagnostics.concat([]);
 	function rangeEquals(r1: vscode.Range, r2: vscode.Range) {
 		return (
 			r1.start.line == r2.start.line &&
@@ -211,22 +225,21 @@ function handleDiagnostics(msg: DiagnosticsMessage) {
 			);
 	}
 	function docContainsDiagnostic(diag: vscode.Diagnostic) {
-		return docDiagnostics.some(d => rangeEquals(d.range, diag.range) && d.message === diag.message);
+		return all_diags.some(d => rangeEquals(d.range, diag.range) && d.message === diag.message);
 	}
 	// De-duplicate diagnostics, because we may get diagnostics from multiple sources
 	// both the fstar_ide and fstar_lax_ide servers may send diagnostics
-	msg.diagnostics.forEach(diag => {
+	docDiagnostics.full_diagnostics.forEach(diag => {
 		if (!docContainsDiagnostic(diag)) {
-			docDiagnostics.push(diag);
+			all_diags.push(diag);
 		}
 	});
-	diagnosticsMap.set(msg.uri, docDiagnostics);
 	const uri = vscode.Uri.parse(msg.uri);
-	diagnosticCollection.set(uri, docDiagnostics);
+	diagnosticCollection.set(uri, all_diags);
 }
 
 function handleClearDiagnostics(msg : ClearDiagnosticsMessage) {
-	diagnosticsMap.set(msg.uri, []);
+	diagnosticsMap.set(msg.uri, { lax_diagnostics: [], full_diagnostics: [] });
 	const uri = vscode.Uri.parse(msg.uri);
 	diagnosticCollection.set(uri, []);
 }
