@@ -267,7 +267,7 @@ interface FullBufferQuery {
 	query: 'full-buffer';
 	args:{
 		kind:'full' | 'lax' | 'cache' | 'reload-deps' | 'verify-to-position' | 'lax-to-position';
-		"with-symbols"?: boolean;
+		"with-symbols": boolean;
 		code:string;
 		line:number;
 		column:number
@@ -391,7 +391,7 @@ function validateFStarDocument(textDocument: TextDocument,kind:'full'|'lax'|'cac
 			query:"full-buffer",
 			args:{
 				kind,
-				"with-symbols":withSymbols ? true : false,
+				"with-symbols":withSymbols,
 				code:textDocument.getText(),
 				line:0,
 				column:0
@@ -417,6 +417,7 @@ function validateFStarDocumentToPosition(textDocument: TextDocument,kind:'verify
 			query:"full-buffer",
 			args:{
 				kind:kind,
+				"with-symbols":false,
 				code:textDocument.getText(),
 				line:0,
 				column:0,
