@@ -100,7 +100,18 @@
 				"command": "fstar-vscode-assistant/lax-to-position",
 				"title": "Lax to position",
 				"category": "F*"
+			},
+			{
+				"command": "fstar-vscode-assistant/kill-and-restart-solver",
+				"title": "Kill and restart solver",
+				"category": "F*"
+			},
+			{
+				"command": "fstar-vscode-assistant/kill-all",
+				"title": "Kill all F* processes for all documents",
+				"category": "F*"
 			}
+
 		],
 		"keybindings": [
 			{
@@ -116,6 +127,16 @@
 			{
 				"command": "fstar-vscode-assistant/lax-to-position",
 				"key": "ctrl+shift+.",
+				"when": "editorTextFocus"
+			},
+			{
+				"command": "fstar-vscode-assistant/kill-and-restart-solver",
+				"key": "ctrl+; ctrl+c",
+				"when": "editorTextFocus"
+			},
+			{
+				"command": "fstar-vscode-assistant/kill-all",
+				"key": "ctrl+; ctrl+shift+c",
 				"when": "editorTextFocus"
 			}
 		]

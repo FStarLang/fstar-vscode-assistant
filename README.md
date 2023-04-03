@@ -11,13 +11,13 @@ https://github.com/artagnon/vsfstar
 
 ## Installation
 
-An initial release v0.1.1 is available on the VSCode marketplace.
+An initial release v0.2.0 is available on the VSCode marketplace.
 
 You need to have a working F* installation, where `fstar.exe` is in your path
 and `fstar.exe --ide A.fst` should print the following protocol-info:
 
 ```
-{"kind":"protocol-info","version":2,"features":["autocomplete","autocomplete/context","compute","compute/reify","compute/pure-subterms","describe-protocol","describe-repl","exit","lookup","lookup/context","lookup/documentation","lookup/definition","peek","pop","push","search","segment","vfs-add","tactic-ranges","interrupt","progress","full-buffer","format","cancel"]}
+{"kind":"protocol-info","version":2,"features":["autocomplete","autocomplete/context","compute","compute/reify","compute/pure-subterms","describe-protocol","describe-repl","exit","lookup","lookup/context","lookup/documentation","lookup/definition","peek","pop","push","search","segment","vfs-add","tactic-ranges","interrupt","progress","full-buffer","format","restart-solver", "cancel"]}
 ```
 
 ## Features and basic usage guide
@@ -98,12 +98,13 @@ You can change the following:
 
   * verifyOnOpen: Set this flag to fully check a file when it is opened
 
-  * flyCheck: You can choose whether or not F* should flycheck a document
-    at every key stroke.
+  * flyCheck: You can choose whether or not F* should implicitly flycheck a document
+    when it is opened, at every key stroke, and when it is closed.
 
   * debug: Set this flag to have the extension log debug information to the console.
 
-  * showFlyCheckIcon: You can choose to not show the gutter icon when F* has flychecked a fragment
+  * showFlyCheckIcon: You can choose to not show the gutter icon when F* has flychecked a fragment.
+    This is only relevant when the flyCheck flag is set.
 
   * showLightCheckIcon: You can choose to not show the gutter icon when F* has only light-checked a fragment
 
@@ -147,6 +148,22 @@ You can also format the entire document using F*'s pretty printer.
 Note: The formatting feature needs to be improving F*'s pretty printer. It doesn't always produce
 the nicest looking code. 
 
+### Interrupting or Killing the Prover
+
+Sometimes, a proof can take a long time for Z3 to check. If you want to abandon 
+the proof search you can kill the underlying Z3 process and ask F* to restart it.
+The following command does that for you:
+
+* fstar-vscode-assistant/kill-and-restart-solver (Ctrl+; Ctrl+c): Kills and restarts
+  the Z3 process for the current document
+
+Also, if you're working on F* itself, sometimes it is useful to kill all the F* processes
+associated with an editor session, so you can rebuild fstar.exe. 
+
+* fstar-vscode-assistant/kill-all (Ctrl+; Ctrl+Shift+c): Will kill and F* processes (and
+  their sub-processes) for all documents. If you want to resume checking a document, you need to
+  restart F* for that document by using the Restart command (Ctrl+; Ctrl+.)
+
 ### Workspace folders
 
 If you have a .fst.config.json file in a folder, you can open the folder as a workspace
@@ -174,7 +191,6 @@ This extensions does not yet support the following features, though support is e
 * Evaluating code snippets on F*'s reduction machinery
 * Types of sub-terms
 * Tactic proof state dumps when there is more than one dump associated with a line, e.g., in loops
-* Allowing the user to terminate a long-running Z3 process by sending it a signal
 
 ## Limitations
 

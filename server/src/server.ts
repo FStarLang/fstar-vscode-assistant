@@ -35,9 +35,8 @@ import {
 } from 'vscode-uri';
 
 import * as cp from 'child_process';
-
+import * as pstree from 'ps-tree';
 import path = require('path');
-
 // Import fs and path modules}
 import * as fs from 'fs';
 import { pathToFileURL } from 'url';
@@ -1208,6 +1207,7 @@ async function refreshDocumentState(textDocument : TextDocument) {
 }
 
 async function onOpenHandler(textDocument : TextDocument) {
+	await updateConfigurationSettings();
 	await refreshDocumentState(textDocument);
 
 	const docState = documentStates.get(textDocument.uri);
@@ -1218,8 +1218,10 @@ async function onOpenHandler(textDocument : TextDocument) {
 		validateFStarDocument(textDocument, "full", false);
 	}
 
-	// And ask the lax fstar process to verify it
-	validateFStarDocument(textDocument, "lax", true, "lax");
+	if (configurationSettings.flyCheck) {
+		// And ask the lax fstar process to verify it
+		validateFStarDocument(textDocument, "lax", true, "lax");
+	}
 }
 
 // The main entry point when a document is opened
@@ -1269,7 +1271,9 @@ documents.onDidChangeContent(change => {
 documents.onDidSave(change => {
 	if (configurationSettings.verifyOnSave) {
 		validateFStarDocument(change.document, "full", false);
-		validateFStarDocument(change.document, "lax", true, "lax"); //retain flycheck markers for the suffix
+		if (configurationSettings.flyCheck) {
+			validateFStarDocument(change.document, "lax", true, "lax"); //retain flycheck markers for the suffix
+		}
 	}
 });
 
@@ -1447,7 +1451,9 @@ connection.onRequest("fstar-vscode-assistant/verify-to-position", (params : any)
 	const textDocument = documents.get(uri);
 	if (!textDocument) { return; }
 	validateFStarDocumentToPosition(textDocument, "verify-to-position", {line:position.line + 1, column:position.character});
-	validateFStarDocument(textDocument, "lax", false, "lax"); //also flycheck, so we get status markers beyond the position too
+	if (configurationSettings.flyCheck) {
+		validateFStarDocument(textDocument, "lax", false, "lax"); //also flycheck, so we get status markers beyond the position too
+	}
 });
 
 connection.onRequest("fstar-vscode-assistant/lax-to-position", (params : any) => {
@@ -1457,7 +1463,9 @@ connection.onRequest("fstar-vscode-assistant/lax-to-position", (params : any) =>
 	const textDocument = documents.get(uri);
 	if (!textDocument) { return; }
 	validateFStarDocumentToPosition(textDocument, "lax-to-position", {line:position.line + 1, column:position.character});
-	validateFStarDocument(textDocument, "lax", false, "lax"); //also flycheck, so we get status markers beyond the position too
+	if (configurationSettings.flyCheck) {
+		validateFStarDocument(textDocument, "lax", false, "lax"); //also flycheck, so we get status markers beyond the position too
+	}
 });
 
 async function onRestartHandler(textDocument?:TextDocument) {
@@ -1466,7 +1474,9 @@ async function onRestartHandler(textDocument?:TextDocument) {
 	await refreshDocumentState(textDocument);
 	sendStatusClear({uri:textDocument.uri});
 	// And ask the lax fstar process to verify it
-	validateFStarDocument(textDocument, "lax", false, "lax");	
+	if (configurationSettings.flyCheck) {
+		validateFStarDocument(textDocument, "lax", false, "lax");
+	}	
 }
 
 connection.onRequest("fstar-vscode-assistant/restart", (uri : any) => {
@@ -1488,6 +1498,44 @@ connection.onRequest("fstar-vscode-assistant/text-doc-changed", (params : any) =
 		}
 	};
 	sendRequestForDocument(textDocument, cancelRequest);
+});
+
+function killZ3SubProcess(textDocument : TextDocument) {
+	const documentState = documentStates.get(textDocument.uri);
+	if (!documentState) { return; }
+	const fstar_ide = documentState.fstar_ide;
+	if (!fstar_ide || !fstar_ide.pid) { return; }
+	pstree(fstar_ide.pid, (err, children) => {
+		if (err) { return; }
+		const z3Processes = children.filter(p => p.COMMAND.startsWith("z3"));
+		z3Processes.forEach(p => {
+			if (configurationSettings.debug) {
+				console.log("Killing z3 process with PID: " + p.PID);
+			}
+			process.kill(parseInt(p.PID));
+		});
+	});
+	// Wait for a second for processes to die before restarting the solver
+	setTimeout(() => {
+		sendRequestForDocument(textDocument, {query:"restart-solver", args:{}});
+	}, 1000);
+}
+
+// This is a request from the client to kill the z3 subprocess and restart it
+connection.onRequest("fstar-vscode-assistant/kill-and-restart-solver", (uri : any) => {
+	const textDocument = documents.get(uri);
+	if (!textDocument) { return; }
+	killZ3SubProcess(textDocument);
+});
+
+// This is a request from the client to kill all the F* processes
+connection.onRequest("fstar-vscode-assistant/kill-all", (params : any) => {
+	documentStates.forEach((docState, uri) => {
+		const textDoc = documents.get(uri);
+		if (!textDoc) { return; }
+		killFStarProcessesForDocument(textDoc);
+	});
+	return;
 });
 
 // Make the text document manager listen on the connection

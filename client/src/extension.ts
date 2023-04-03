@@ -315,8 +315,20 @@ export function activate(context: ExtensionContext) {
 		// console.log('Client: Command <lax-to-position> executed with uri: ' + textEditor.document.uri + " at positon " + textEditor.selection.active.line + ", " + textEditor.selection.active.character);
 		client.sendRequest('fstar-vscode-assistant/lax-to-position', [textEditor.document.uri.toString(), textEditor.selection.active]);
 	});
-	context.subscriptions.push(verifyCommand);
+	context.subscriptions.push(laxVerifyCommand);
+
+	const killAndRestartSolverCommand =
+		vscode.commands.registerTextEditorCommand('fstar-vscode-assistant/kill-and-restart-solver', (textEditor, edit) => {
+		client.sendRequest('fstar-vscode-assistant/kill-and-restart-solver', [textEditor.document.uri.toString()]);
+	});
+	context.subscriptions.push(killAndRestartSolverCommand);
 	
+	const killAllCommand =
+		vscode.commands.registerTextEditorCommand('fstar-vscode-assistant/kill-all', (textEditor, edit) => {
+		client.sendRequest('fstar-vscode-assistant/kill-all', []);
+	});
+	context.subscriptions.push(killAllCommand);
+
 	// console.log("Activate called on " + context.asAbsolutePath("/"));
 
 	workspace.onDidChangeTextDocument((event) => {

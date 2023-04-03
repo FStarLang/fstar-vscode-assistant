@@ -12,9 +12,13 @@
 		"url": "https://github.com/FStarLang/fstar-vscode-assistant"
 	},
 	"dependencies": {
+		"ps-tree": "*",
 		"vscode-languageserver": "^7.0.0",
 		"vscode-languageserver-textdocument": "^1.0.4",
 		"vscode-uri": "*"
 	},
-	"scripts": {}
+	"scripts": {},
+	"devDependencies": {
+		"@types/ps-tree": "^1.1.2"
+	}
 }
