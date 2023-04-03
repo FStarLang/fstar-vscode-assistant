@@ -11,7 +11,7 @@ https://github.com/artagnon/vsfstar
 
 ## Installation
 
-An initial release v0.2.0 is available on the VSCode marketplace.
+An initial release v0.3.0 is available on the VSCode marketplace.
 
 You need to have a working F* installation, where `fstar.exe` is in your path
 and `fstar.exe --ide A.fst` should print the following protocol-info:
