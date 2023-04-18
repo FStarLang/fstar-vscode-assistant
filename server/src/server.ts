@@ -810,9 +810,7 @@ function handleOneResponseForDocument(textDocument: TextDocument, data:string, l
 		}
 	}
 	else if (r.kind == "message" && r.level == "info") {
-		if (configurationSettings.debug) {
-			console.log("Info: " + r.contents);
-		}
+		console.log("Info: " + r.contents);
 	}
 	else {
 		if (configurationSettings.debug) {
@@ -1244,6 +1242,17 @@ function killFStarProcessesForDocument(textDocument : TextDocument) {
 // Only keep settings for open documents
 documents.onDidClose(e => {
 	killFStarProcessesForDocument(e.document);
+	// Clear all diagnostics for a document when it is closed
+	sendDiagnostics({
+		uri: e.document.uri,
+		lax:true,
+		diagnostics: []
+	});
+	sendDiagnostics({
+		uri: e.document.uri,
+		lax:false,
+		diagnostics: []
+	});
 });
 
 
