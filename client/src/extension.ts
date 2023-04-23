@@ -246,7 +246,8 @@ function handleClearDiagnostics(msg : ClearDiagnosticsMessage) {
 
 // A client-only handler for a active editor changed raised by the editor
 // We set the gutter decorations for the document in the new active editor
-function handleDidChangeActiveEditor(editor : vscode.TextEditor) {
+function handleDidChangeActiveEditor(editor? : vscode.TextEditor) {
+	if (!editor) return;
 	// console.log("Active editor changed to " + editor.document.uri.toString());
 	setActiveEditorDecorationsIfUriMatches(editor.document.uri.toString());
 }
@@ -334,8 +335,8 @@ export function activate(context: ExtensionContext) {
 	workspace.onDidChangeTextDocument((event) => {
 		// console.log("OnDidChangeTextDocument");
 		const textDoc = event.document;
-		let minRange : vscode.Range;
-		function compareRange (a : vscode.Range, b : vscode.Range) : number {
+		let minRange : vscode.Range | undefined;
+		function compareRange (a? : vscode.Range, b? : vscode.Range) : number {
 			if (!a) { return -1; }
 			if (!b) { return 1; }
 			if (a.start.line < b.start.line) return -1;
