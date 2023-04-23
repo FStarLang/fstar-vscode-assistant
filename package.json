@@ -18,7 +18,8 @@
 		"vscode": "^1.74.0"
 	},
 	"activationEvents": [
-		"onLanguage:fstar"
+		"onLanguage:fstar",
+		"workspaceContains:/.fst.config.json"
 	],
 	"main": "./client/out/extension",
 	"contributes": {
