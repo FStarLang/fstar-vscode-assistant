@@ -138,10 +138,24 @@ If you are using tactics, you can hover on tactic line to see the last proof sta
 ### Completions
 
 The extension will suggest auto-completions as you type, based on the symbol resolution in the
-current open namespaces in the document.
+current open namespaces in the document. These completions show up in the completion window as
+"Method type": a small cube icon precedes them. 
 
 Additionally, vscode provides default name completions based on heuristic syntactic matches
-for symbols in the current workspace.
+for symbols in the current workspace. These completions show up in the completion window as
+"Text type": an "abc" icon precedes them.
+
+#### Limitations
+
+Completions only work on fully qualified names. If you have a module abbreviation
+`module L = FStar.List.Tot` and type `L.ma` this will *not* complete, since the auto-complete
+feature of the F* server does not resolve module abbreviations. 
+
+Auto-completion also does not resolve module inclusion. So, if you type `FStar.List.Tot.ma` this also
+will not complete, since `map` is defined in the included module `FStar.List.Tot.Base.map`. If you 
+type `FStar.List.Tot.Base.m` this will complete.
+
+Improvements to remove these limitations are most welcome.
 
 ### Format document and format selection
 
