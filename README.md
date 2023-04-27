@@ -157,8 +157,8 @@ Sometimes, a proof can take a long time for Z3 to check. If you want to abandon
 the proof search you can kill the underlying Z3 process and ask F* to restart it.
 The following command does that for you:
 
-* fstar-vscode-assistant/kill-and-restart-solver (Ctrl+; Ctrl+c): Kills and restarts
-  the Z3 process for the current document
+* fstar-vscode-assistant/kill-and-restart-solver (Ctrl+; Ctrl+c): Terminates the Z3 proof
+  search for the current function but maintains the proved status of the file up to that point.
 
 Also, if you're working on F* itself, sometimes it is useful to kill all the F* processes
 associated with an editor session, so you can rebuild fstar.exe. 
