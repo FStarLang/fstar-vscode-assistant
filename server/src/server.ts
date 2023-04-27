@@ -1321,7 +1321,7 @@ connection.onCompletion(
 		if (shouldSendRequest) {
 			const wordAndRange = autoCompleteResponses.wordAndRange;
 			// Don't send requests for very short words
-			if (wordAndRange.word.length < 3) return [];
+			if (wordAndRange.word.length < 2) return [];
 			const autoCompletionRequest : AutocompleteRequest = {
 				"query": "autocomplete",
 				"args": {
@@ -1329,7 +1329,7 @@ connection.onCompletion(
 					"context": "code"
 				}
 			};
-			sendRequestForDocument(doc, autoCompletionRequest);
+			sendRequestForDocument(doc, autoCompletionRequest, configurationSettings.flyCheck ? "lax" : undefined);
 		}
 		const items : CompletionItem[] = [];
 		bestMatch.value.forEach((response) => {
@@ -1340,7 +1340,7 @@ connection.onCompletion(
 			const label = response[2].lastIndexOf('.') > 0 ? response[2].substring(response[2].lastIndexOf('.') + 1) : response[2];
 			const item : CompletionItem = {
 				label: label,
-				kind: CompletionItemKind.Text,
+				kind: CompletionItemKind.Method,
 				data: data
 			};
 			items.push(item);
