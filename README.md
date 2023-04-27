@@ -143,7 +143,8 @@ current open namespaces in the document. These completions show up in the comple
 
 Additionally, vscode provides default name completions based on heuristic syntactic matches
 for symbols in the current workspace. These completions show up in the completion window as
-"Text type": an "abc" icon precedes them.
+"Text type": an "abc" icon precedes them. These are not necessarily reliable, i.e., a name
+suggested as a text completion may not actually exist in the current scope.
 
 #### Limitations
 
