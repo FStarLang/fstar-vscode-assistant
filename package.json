@@ -3,7 +3,7 @@
 	"description": "An interactive editing mode for F*",
 	"author": "Microsoft Corporation",
 	"license": "MIT",
-	"version": "0.4.0",
+	"version": "0.4.1",
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/FStarLang/fstar-vscode-assistant"
