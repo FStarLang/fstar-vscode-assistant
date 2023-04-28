@@ -53,15 +53,17 @@ as illustrated by the screenshot below.
 
 ![Screenshot](resources/screenshot.png)
 
-The screenshot shows two buffers in various states of checking:
+The screenshot shows two documents in various states of checking:
 
-1. In progress: On the left, a prefix of the buffer has an hourglass in the gutter. These lines
+1. In progress: On the left, a prefix of the document has an hourglass in the gutter. These lines
    are currently being checked by F*.
 
 2. Scheduled: The next few lines are marked with "..." in the gutter. These lines are scheduled to be
-   checked by F* after the in-progress lines are finished, if they finish successfully. 
+   checked by F* after the in-progress lines are finished, if they finish successfully. In this case, 
+   the user has asked to check the document until the last line marked with "...". F* will check the
+   document up to the definition that encloses the last line that the user requested.
 
-3. Fully checked: On the right, a prefix of the buffer has a green dashed line in the gutter. These 
+3. Fully checked: On the right, a prefix of the document has a green dashed line in the gutter. These 
    lines have been fully verified.
 
 4. Light checked: On the right, the next few lines have a blue dashed line in the gutter. These lines
