@@ -384,6 +384,8 @@ function validateFStarDocument(textDocument: TextDocument,kind:'full'|'lax'|'cac
 			doc_state.prefix_stale = false;
 		}
 		sendStatusClear({uri:textDocument.uri});
+		const ranges = [Range.create(mkPosition([0,0]), mkPosition([textDocument.lineCount, 0]))];
+		if (kind == "full") { sendStatusStarted({uri:textDocument.uri, ranges:ranges}); }
 	}
 	if (supportsFullBuffer) {
 		const push_context : FullBufferQuery = { 
@@ -401,6 +403,7 @@ function validateFStarDocument(textDocument: TextDocument,kind:'full'|'lax'|'cac
 }
 
 function validateFStarDocumentToPosition(textDocument: TextDocument,kind:'verify-to-position'|'lax-to-position', position:{line:number, column:number}) {
+	pendingChangeEvents = []; // Clear pending change events, since we're checking it now
 	// console.log("ValidateFStarDocumentToPosition( " + textDocument.uri + ", " + kind);
 	sendClearDiagnostics({uri:textDocument.uri});
 	// If this is non-lax requests, send a status clear messages to VSCode
@@ -411,6 +414,8 @@ function validateFStarDocumentToPosition(textDocument: TextDocument,kind:'verify
 		doc_state.prefix_stale = false;
 	}
 	sendStatusClear({uri:textDocument.uri});
+	const ranges = [Range.create(mkPosition([0,0]), mkPosition([position.line, 0]))];
+	sendStatusStarted({uri:textDocument.uri, ranges:ranges});
 	if (supportsFullBuffer) {
 		const push_context : FullBufferQuery = { 
 			query:"full-buffer",
@@ -463,13 +468,19 @@ interface StatusClearMessage {
 	uri: string;
 }
 
-// A message to set the background color of chunk that is being verified
+// A message to set the chevron icons for the prefix of the buffer that has been started
 interface StatusStartedMessage {
 	uri: string;
 	ranges: Range []; // A VSCode range, not an FStarRange
 }
 
-// A message to dislay check-mark gutter icons for the document of the given URI
+// A message to set hourglass icons for the current chunk being verified
+interface StatusInProgressMessage {
+	uri: string;
+	ranges: Range []; // A VSCode range, not an FStarRange
+}
+
+// A message to dislay various line gutter icons for the document of the given URI
 // at the given ranges
 type ok_kind = 'checked' | 'light-checked' | 'flychecked';
 interface StatusOkMessage {
@@ -732,6 +743,10 @@ function sendStatusStarted (msg : StatusStartedMessage)  {
 	connection.sendNotification('fstar-vscode-assistant/statusStarted', msg);
 }
 
+function sendStatusInProgress (msg : StatusInProgressMessage)  {
+	connection.sendNotification('fstar-vscode-assistant/statusInProgress', msg);
+}
+
 function sendStatusOk (msg : StatusOkMessage)  {
 	connection.sendNotification('fstar-vscode-assistant/statusOk', msg);
 }
@@ -924,7 +939,7 @@ function handleIdeProgress(textDocument: TextDocument, contents : IdeProgress, l
 			uri: textDocument.uri,
 			ranges: [ok_range]
 		};
-		sendStatusStarted(msg);
+		sendStatusInProgress(msg);
 		//If there's any proof state for the range that's starting
 		//clear it, because we'll get updates from fstar_ide
 		clearIdeProofProofStateAtRange(textDocument, rng);
@@ -1279,6 +1294,7 @@ documents.onDidChangeContent(change => {
 
 documents.onDidSave(change => {
 	if (configurationSettings.verifyOnSave) {
+		pendingChangeEvents = []; //don't send any pending change events
 		validateFStarDocument(change.document, "full", false);
 		if (configurationSettings.flyCheck) {
 			validateFStarDocument(change.document, "lax", true, "lax"); //retain flycheck markers for the suffix

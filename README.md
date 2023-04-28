@@ -48,19 +48,37 @@ This extension launches two F* processes for each document: One for fly-checking
 and another for explicit user-triggered checking requests.
 
 For each line of the document for which the user explicitly requested checking
-F* indicates the checking status with an icon in the gutter on the left of the editor pane.
+F* indicates the checking status with an icon in the gutter on the left of the editor pane, 
+as illustrated by the screenshot below.
 
-There are four kinds of gutter icons:
+![Screenshot](resources/screenshot.png)
 
-1. An eye icon: This line was flychecked. You can choose to disable this in the user settings (see below).
+The screenshot shows two buffers in various states of checking:
 
-2. A check mark: This line was fully checked
+1. In progress: On the left, a prefix of the buffer has an hourglass in the gutter. These lines
+   are currently being checked by F*.
 
-3. An hourglass: This line is currently being processed by F* for full checking
+2. Scheduled: The next few lines are marked with "..." in the gutter. These lines are scheduled to be
+   checked by F* after the in-progress lines are finished, if they finish successfully. 
 
-4. A question mark: This line was processed by F*, but the user instructed 
-   F* to only light check it. You can choose to disable this in the user settings (see below).
+3. Fully checked: On the right, a prefix of the buffer has a green dashed line in the gutter. These 
+   lines have been fully verified.
 
+4. Light checked: On the right, the next few lines have a blue dashed line in the gutter. These lines
+   were processed by F*, but the user instructed F* to only light check it. You can choose to
+   disable displaying this blue line indicator in the user settings (see below).
+
+5. Fly checked: On the right, after the blue lines, we have regions that are marked with a grey line
+   in the gutter. These lines have been flychecked, i.e., F* checked them implicitly as the user was typing.
+   You can disable flychecking and the flychecking marker, but flychecking is useful for at least two reasons:
+
+   - Until a region of the buffer has been successfully flychecked, there's no point in asking F* to verify it
+     (by pressing Ctrl+., see below), since that will definitely fail.
+
+   - Code that has been successfully flychecked has symbols loaded in the IDE, so you can hover on symbols
+     for their type, jump to definitions etc.
+
+    
 #### Basic Navigation
 
 * Fly-check on opening: When a file is opened, F* will, by default, 
