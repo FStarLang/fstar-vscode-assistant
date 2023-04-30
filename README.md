@@ -11,14 +11,21 @@ https://github.com/artagnon/vsfstar
 
 ## Installation
 
-An initial release v0.3.0 is available on the VSCode marketplace.
+An initial release is available on the VSCode marketplace: https://marketplace.visualstudio.com/items?itemName=FStarLang.fstar-vscode-assistant
 
 You need to have a working F* installation, where `fstar.exe` and `z3` are in your path.
+
+Use the latest release of F* : https://github.com/FStarLang/FStar/releases/tag/v2023.04.25
+
+
 If you have installed F* or Z3 using opam, make sure you start VS Code from inside the opam environment after running `eval $(opam env)`.
 If you are using WSL, the WSL plugin for VS Code will run your `bashrc`, and it is enough to put the `eval $(opam env)` there.
 (When only Z3 is missing, you will get a message like `ERROR: F* flycheck process exited with code 1`.)
 
-The command `fstar.exe --ide A.fst` should print the following protocol-info:
+
+The command `fstar.exe --ide A.fst` should print the following protocol-info (Look at the full strig, it ends with ""full-buffer","format","restart-solver", "cancel"]}".
+
+
 ```json
 {"kind":"protocol-info","version":2,"features":["autocomplete","autocomplete/context","compute","compute/reify","compute/pure-subterms","describe-protocol","describe-repl","exit","lookup","lookup/context","lookup/documentation","lookup/definition","peek","pop","push","search","segment","vfs-add","tactic-ranges","interrupt","progress","full-buffer","format","restart-solver", "cancel"]}
 ```
