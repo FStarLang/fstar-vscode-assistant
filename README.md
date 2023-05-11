@@ -229,6 +229,67 @@ for launching `fstar.exe`. Here is a sample .fst.config.json file:
 You can open multiple workspace folders, each with their own config file which applies only 
 to files within that folder.
 
+### Working with the vscode remote ssh extension
+
+This extension (by default) works well with the
+[vscode remote ssh extesion](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-ssh).
+The remote ssh extension enables working on remote files and folders
+on a local vscode client. If `fstar.exe` is in path on the remote machine,
+then the F* extension works seamlessly on the remote files.
+
+Steps to configure the remote ssh extension are given in detail
+[here](https://code.visualstudio.com/docs/remote/ssh). At a high-level:
+
+- Configure key-based authentication on the ssh server. The advantage of
+  this step is that logging-in will not require password.
+	[This page](https://code.visualstudio.com/docs/remote/troubleshooting#_configuring-key-based-authentication)
+	describes setting up key based authentication in detail.
+
+	One caveat for cygwin-based setup is that the client (referred to as "machine" in the page above)
+	may have two ssh keys: one in the windows file system and one in the cygwin file system.
+  I setup authentication for both (i.e., both the steps under
+	"Authorize your macOS or Linux machine to connect" from within the cygwin client
+	and steps under "Authorize your Windows machine to connect" within powershell).
+
+- Install the remote ssh extension in vscode.
+  In the activity bar, a new icon for "Remote Explorer" appears.
+
+- Click on that "Remote Explorer" icon, and then on the `+` sign next to the `SSH` under remote explorer.
+
+- In the command palette, type `ssh username@host` and press Enter.
+
+- It will then ask for the SSH configuration file to update, I chose the first one it showed me
+  (e.g., `C:\Users\aseemr\.ssh\config`).
+
+- This step is a "hack" that you may have to do if your username on the remote machine is
+  different from the local username. When trying to connect
+	(by pressing the connect button on the dialog box at the botton right after selecting the config file),
+	the extension may use the local username and hence will fail.
+
+	One way to get around this is by changing the config file from:
+
+	```
+	Host <hostname>
+  HostName <hostname>
+  User <username>
+  ```
+
+	to
+
+	```
+	Host <username>@<hostname>
+  HostName <hostname>
+  User <username>
+  ```
+
+	Note the change in the first line to explicitly add the remote username.
+
+  Reload the window after doing this, so that this config appears under the SSH connections in the explorer.
+	And then connecting works fine.
+
+- Once connected, we can open folders, files, work with F* as usual.
+  Make sure F* is in path on the remote machine.
+
 ## Planned features
 
 This extensions does not yet support the following features, though support is expected soon.
