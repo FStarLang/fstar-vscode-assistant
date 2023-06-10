@@ -52,7 +52,6 @@ interface fstarVSCodeAssistantSettings {
 	verifyOnSave: boolean;
 	flyCheck: boolean;
 	debug: boolean;
-	showFlyCheckIcon: boolean;
 	showLightCheckIcon: boolean;
 }
 
@@ -85,7 +84,6 @@ let configurationSettings : fstarVSCodeAssistantSettings = {
 	verifyOnSave: true,
 	flyCheck: true,
 	debug: false,
-	showFlyCheckIcon: true,
 	showLightCheckIcon: true
 };
 
@@ -483,7 +481,7 @@ interface StatusInProgressMessage {
 
 // A message to dislay various line gutter icons for the document of the given URI
 // at the given ranges
-type ok_kind = 'checked' | 'light-checked' | 'flychecked';
+type ok_kind = 'checked' | 'light-checked';
 interface StatusOkMessage {
 	uri: string;
 	ok_kind: ok_kind;
@@ -902,6 +900,8 @@ function handleIdeProgress(textDocument: TextDocument, contents : IdeProgress, l
 		}
 		return;
 	}
+	if (lax) { return; }
+	// We don't send intermediate diagnostics and gutter icons for flycheck progress
 	if (contents.stage == "full-buffer-fragment-ok" ||
 		contents.stage == "full-buffer-fragment-lax-ok") {
 		if (doc_state.prefix_stale) { return; }
@@ -922,8 +922,7 @@ function handleIdeProgress(textDocument: TextDocument, contents : IdeProgress, l
 		}
 		const ok_range = Range.create(mkPosition(rng.beg), mkPosition(rng.end));
 		let ok_kind  : ok_kind;
-		if (lax) { ok_kind = "flychecked"; }
-		else if (contents.stage == "full-buffer-fragment-lax-ok") { ok_kind = "light-checked"; }
+        if (contents.stage == "full-buffer-fragment-lax-ok") { ok_kind = "light-checked"; }
 		else { ok_kind = "checked";}
 		const msg : StatusOkMessage = {
 			uri: textDocument.uri,

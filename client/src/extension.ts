@@ -21,7 +21,6 @@ interface fstarVSCodeAssistantSettings {
 	verifyOnSave: boolean;
 	flyCheck: boolean;
 	debug: boolean;
-	showFlyCheckIcon: boolean;
 	showLightCheckIcon: boolean;
 }
 
@@ -30,19 +29,18 @@ let fstarVSCodeAssistantSettings: fstarVSCodeAssistantSettings = {
 	verifyOnSave: true,
 	flyCheck: true,
 	debug: false,
-	showFlyCheckIcon: true,
 	showLightCheckIcon: true
 };
 
 // This is the green dashed line icon that will be displayed in the gutter
 const gutterIconOk = vscode.window.createTextEditorDecorationType({
-	gutterIconSize: 'contain',
+	gutterIconSize: '20%',
 	gutterIconPath: path.join(__filename, '..', '..', '..', 'resources',  'icons', 'checked.svg')
 });
 
 // This is the blue dashed line icon that will be displayed in the gutter
 const gutterIconLax = vscode.window.createTextEditorDecorationType({
-	gutterIconSize: 'contain',
+	gutterIconSize: '20%',
 	gutterIconPath: path.join(__filename, '..', '..', '..', 'resources',  'icons', 'laxcheck.svg')
 });
 
@@ -52,15 +50,9 @@ const gutterIconHourglass = vscode.window.createTextEditorDecorationType({
 	gutterIconPath: path.join(__filename, '..', '..', '..', 'resources',  'icons', 'hourglass.svg')
 });
 
-// This is the grey dashed linethat will be displayed in the gutter
-const gutterIconFlycheck = vscode.window.createTextEditorDecorationType({
-	gutterIconSize: 'contain',
-	gutterIconPath: path.join(__filename, '..', '..', '..', 'resources',  'icons', 'flycheck.svg')
-});
-
 // This is the "..." icon that will be displayed in the gutter
 const gutterIconStarted = vscode.window.createTextEditorDecorationType({
-	gutterIconSize: 'contain',
+	gutterIconSize: '100%',
 	gutterIconPath: path.join(__filename, '..', '..', '..', 'resources',  'icons', 'started.svg')
 });
 
@@ -69,9 +61,6 @@ const gutterOkDecorationsMap : Map<string, vscode.Range[]> = new Map<string, vsc
 
 // A map from file URI to the laxcheck gutter decorations positions for it
 const gutterLaxDecorationsMap : Map<string, vscode.Range[]> = new Map<string, vscode.Range[]>();
-
-// A map from file URI to the flycheck gutter decorations positions for it
-const gutterFlyCheckDecorationsMap : Map<string, vscode.Range[]> = new Map<string, vscode.Range[]>();
 
 // A map from file URI to the hourglass gutter decoration positions for it
 const proofInProgressDecorationMap : Map<string, vscode.Range[]> = new Map<string, vscode.Range[]>();
@@ -94,7 +83,7 @@ const inProgressBackground = vscode.window.createTextEditorDecorationType({
 
 
 // Messags in the small protocol running on top of LSP between the server and client
-type ok_kind = 'checked' | 'light-checked' | 'flychecked';
+type ok_kind = 'checked' | 'light-checked';
 interface StatusOkMessage {
 	uri: string;
 	ok_kind: ok_kind;
@@ -143,31 +132,30 @@ function setActiveEditorDecorationsIfUriMatches(uri: string) {
 	if (!editor) {	return; }
 	if (editor.document.uri.toString() === uri) {
 		//it important to set it in this order since they get overwritten
-		// First show the flycheck (greyline) icons, except for lines where the proof has been scheduled
-		// Then, show the started (...) icons for all the lines where the proof has been launched, 
+		// First, show the started (...) icons for all the lines where the proof has been launched, 
 		// but only on the suffix of the buffer where the proof has not been completed
 		// Then, show  the hourglass icons for all the lines where the proof is currently running progress
 		// Then, show the green line icons for all the lines where the proof has succeeded
 		// Or, show the blue line for all the lines where the proof has lax succeeded
 		const started = proofStartedDecorationMap.get(uri) ?? [];
-		if (fstarVSCodeAssistantSettings.showFlyCheckIcon) {
-			const flyChecks = gutterFlyCheckDecorationsMap.get(uri) ?? [];
-			const flyCheckNotStarted : vscode.Range[] = [];
-			flyChecks.forEach(flyCheck => {
-				if (started.length == 0) {
-					flyCheckNotStarted.push(flyCheck);
-				}
-				else if (flyCheck.start.line > started[0].end.line) {
-					flyCheckNotStarted.push(flyCheck);
-				}
-			});
-			editor.setDecorations(gutterIconFlycheck, flyCheckNotStarted);
-		}
 		const maxCheckLine = Math.max(...(gutterOkDecorationsMap.get(uri) ?? []).map(range => range.end.line));
+		const maxLightCheckLine = Math.max(...(gutterLaxDecorationsMap.get(uri) ?? []).map(range => range.end.line));
+		const checkLine = Math.max(maxCheckLine, maxLightCheckLine);
 		const startedIcons : vscode.Range[] = [];
 		started.forEach(startedRange => { 
-			if (startedRange.end.line > maxCheckLine) {
-				startedIcons.push(new vscode.Range(maxCheckLine + 1, 0, startedRange.end.line, 0));
+			if (startedRange.end.line > checkLine) {
+				// find the first line from checkLine + 1 that has some text on it
+				let startedLine = checkLine + 1;
+				while (startedLine < startedRange.end.line) {
+					const lineText = editor.document.lineAt(startedLine).text;
+					if (lineText.trim().length > 0) {
+						break;
+					}
+					startedLine++;
+				}
+				if (startedLine < startedRange.end.line) {
+					startedIcons.push(new vscode.Range(startedLine, 0, startedRange.end.line, 0));
+				}
 			}});
 		editor.setDecorations(gutterIconStarted, startedIcons);
 		editor.setDecorations(gutterIconHourglass, proofInProgressDecorationMap.get(uri) ?? []);
@@ -191,13 +179,6 @@ function handleStatusOk (msg : StatusOkMessage)  {
 			currentDecorations.push(range);
 		});
 		gutterLaxDecorationsMap.set(msg.uri, currentDecorations);	
-	}
-	else if (msg.ok_kind == "flychecked") {
-		const currentDecorations : vscode.Range [] = gutterFlyCheckDecorationsMap.get(msg.uri) ?? [];
-		msg.ranges.forEach (range => {
-			currentDecorations.push(range);
-		});
-		gutterFlyCheckDecorationsMap.set(msg.uri, currentDecorations);
 	}
 	else {
 		const currentDecorations : vscode.Range [] = gutterOkDecorationsMap.get(msg.uri) ?? [];
@@ -243,7 +224,6 @@ function handleStatusClear (msg: StatusClearMessage): void {
 	// console.log("Received statusClear notification: " +msg);
 	gutterOkDecorationsMap.set(msg.uri, []);
 	gutterLaxDecorationsMap.set(msg.uri, []);
-	gutterFlyCheckDecorationsMap.set(msg.uri, []);
 	proofStartedDecorationMap.set(msg.uri, []);
 	proofInProgressDecorationMap.set(msg.uri, []);
 	diagnosticsMap.set(msg.uri, { lax_diagnostics: [], full_diagnostics: [] });
@@ -414,7 +394,6 @@ export function activate(context: ExtensionContext) {
 			verifyOnSave: cfg.get('verifyOnSave', fstarVSCodeAssistantSettings.verifyOnSave),
 			flyCheck: cfg.get('flyCheck', fstarVSCodeAssistantSettings.flyCheck),
 			debug: cfg.get('debug', fstarVSCodeAssistantSettings.debug),
-			showFlyCheckIcon: cfg.get('showFlyCheckIcon', fstarVSCodeAssistantSettings.showFlyCheckIcon),
 			showLightCheckIcon: cfg.get('showLightCheckIcon', fstarVSCodeAssistantSettings.showLightCheckIcon),
 		};
 	});

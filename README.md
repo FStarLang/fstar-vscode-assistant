@@ -74,19 +74,9 @@ The screenshot shows two documents in various states of checking:
    lines have been fully verified.
 
 4. Light checked: On the right, the next few lines have a blue dashed line in the gutter. These lines
-   were processed by F*, but the user instructed F* to only light check it. You can choose to
+   were processed by F*, but the user instructed F* to only light check it. As you can see, these
+   lines are not actually proven correct by F* (e.g., `let x : nat = -1` is accepted). You can choose to
    disable displaying this blue line indicator in the user settings (see below).
-
-5. Fly checked: On the right, after the blue lines, we have regions that are marked with a grey line
-   in the gutter. These lines have been flychecked, i.e., F* checked them implicitly as the user was typing.
-   You can disable flychecking and the flychecking marker, but flychecking is useful for at least two reasons:
-
-   - Until a region of the buffer has been successfully flychecked, there's no point in asking F* to verify it
-     (by pressing Ctrl+., see below), since that will definitely fail.
-
-   - Code that has been successfully flychecked has symbols loaded in the IDE, so you can hover on symbols
-     for their type, jump to definitions etc.
-
     
 #### Basic Navigation
 
@@ -132,9 +122,6 @@ You can change the following:
     when it is opened, at every key stroke, and when it is closed.
 
   * debug: Set this flag to have the extension log debug information to the console.
-
-  * showFlyCheckIcon: You can choose to not show the gutter icon when F* has flychecked a fragment.
-    This is only relevant when the flyCheck flag is set.
 
   * showLightCheckIcon: You can choose to not show the gutter icon when F* has only light-checked a fragment
 

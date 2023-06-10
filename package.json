@@ -68,12 +68,6 @@
 					"default": false,
 					"description": "Log debugging information to the console."
 				},
-				"fstarVSCodeAssistant.showFlyCheckIcon": {
-					"scope": "resource",
-					"type": "boolean",
-					"default": true,
-					"description": "Show the grey line in the gutter to indicate which parts of a document have been flychecked?"
-				},
 				"fstarVSCodeAssistant.showLightCheckIcon": {
 					"scope": "resource",
 					"type": "boolean",
