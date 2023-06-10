@@ -45,7 +45,9 @@ There are three forms of checking:
   * Light checking: Where F* checks the basic well-formedness of a program, but
     without proving that it is fully type correct. This form of checking is sufficient
     to detect basic typing errors, e.g., treating an integer as a string. Note, 
-    light checking corresponds to checking a definition with `--lax`.
+    light checking corresponds to checking a definition with `--lax`. This form of 
+    lax checking is sometimes useful if a user wants to quickly skip past a part of the
+    document that they will verify fully later.
 
   * Fly checking: Where F* implicitly light-checks the document every time the document changes.
 
@@ -77,6 +79,9 @@ The screenshot shows two documents in various states of checking:
    were processed by F*, but the user instructed F* to only light check it. As you can see, these
    lines are not actually proven correct by F* (e.g., `let x : nat = -1` is accepted). You can choose to
    disable displaying this blue line indicator in the user settings (see below).
+
+5. Fully checked with light prefix: The rest of the document on the right has been checked, however
+   since it follows some lines that have been admitted, you should be wary of the verification result.
     
 #### Basic Navigation
 
