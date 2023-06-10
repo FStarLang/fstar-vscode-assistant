@@ -11,14 +11,21 @@ https://github.com/artagnon/vsfstar
 
 ## Installation
 
-An initial release v0.3.0 is available on the VSCode marketplace.
+An initial release is available on the VSCode marketplace: https://marketplace.visualstudio.com/items?itemName=FStarLang.fstar-vscode-assistant
 
 You need to have a working F* installation, where `fstar.exe` and `z3` are in your path.
+
+Use the latest release of F* : https://github.com/FStarLang/FStar/releases/tag/v2023.04.25
+
+
 If you have installed F* or Z3 using opam, make sure you start VS Code from inside the opam environment after running `eval $(opam env)`.
 If you are using WSL, the WSL plugin for VS Code will run your `bashrc`, and it is enough to put the `eval $(opam env)` there.
 (When only Z3 is missing, you will get a message like `ERROR: F* flycheck process exited with code 1`.)
 
-The command `fstar.exe --ide A.fst` should print the following protocol-info:
+
+The command `fstar.exe --ide A.fst` should print the following protocol-info (Look at the full strig, it ends with ""full-buffer","format","restart-solver", "cancel"]}".
+
+
 ```json
 {"kind":"protocol-info","version":2,"features":["autocomplete","autocomplete/context","compute","compute/reify","compute/pure-subterms","describe-protocol","describe-repl","exit","lookup","lookup/context","lookup/documentation","lookup/definition","peek","pop","push","search","segment","vfs-add","tactic-ranges","interrupt","progress","full-buffer","format","restart-solver", "cancel"]}
 ```
@@ -38,7 +45,9 @@ There are three forms of checking:
   * Light checking: Where F* checks the basic well-formedness of a program, but
     without proving that it is fully type correct. This form of checking is sufficient
     to detect basic typing errors, e.g., treating an integer as a string. Note, 
-    light checking corresponds to checking a definition with `--lax`.
+    light checking corresponds to checking a definition with `--lax`. This form of 
+    lax checking is sometimes useful if a user wants to quickly skip past a part of the
+    document that they will verify fully later.
 
   * Fly checking: Where F* implicitly light-checks the document every time the document changes.
 
@@ -67,19 +76,12 @@ The screenshot shows two documents in various states of checking:
    lines have been fully verified.
 
 4. Light checked: On the right, the next few lines have a blue dashed line in the gutter. These lines
-   were processed by F*, but the user instructed F* to only light check it. You can choose to
+   were processed by F*, but the user instructed F* to only light check it. As you can see, these
+   lines are not actually proven correct by F* (e.g., `let x : nat = -1` is accepted). You can choose to
    disable displaying this blue line indicator in the user settings (see below).
 
-5. Fly checked: On the right, after the blue lines, we have regions that are marked with a grey line
-   in the gutter. These lines have been flychecked, i.e., F* checked them implicitly as the user was typing.
-   You can disable flychecking and the flychecking marker, but flychecking is useful for at least two reasons:
-
-   - Until a region of the buffer has been successfully flychecked, there's no point in asking F* to verify it
-     (by pressing Ctrl+., see below), since that will definitely fail.
-
-   - Code that has been successfully flychecked has symbols loaded in the IDE, so you can hover on symbols
-     for their type, jump to definitions etc.
-
+5. Fully checked with light prefix: The rest of the document on the right has been checked, however
+   since it follows some lines that have been admitted, you should be wary of the verification result.
     
 #### Basic Navigation
 
@@ -125,9 +127,6 @@ You can change the following:
     when it is opened, at every key stroke, and when it is closed.
 
   * debug: Set this flag to have the extension log debug information to the console.
-
-  * showFlyCheckIcon: You can choose to not show the gutter icon when F* has flychecked a fragment.
-    This is only relevant when the flyCheck flag is set.
 
   * showLightCheckIcon: You can choose to not show the gutter icon when F* has only light-checked a fragment
 
@@ -221,6 +220,67 @@ for launching `fstar.exe`. Here is a sample .fst.config.json file:
 
 You can open multiple workspace folders, each with their own config file which applies only 
 to files within that folder.
+
+### Working with the vscode remote ssh extension
+
+This extension (by default) works well with the
+[vscode remote ssh extesion](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-ssh).
+The remote ssh extension enables working on remote files and folders
+on a local vscode client. If `fstar.exe` is in path on the remote machine,
+then the F* extension works seamlessly on the remote files.
+
+Steps to configure the remote ssh extension are given in detail
+[here](https://code.visualstudio.com/docs/remote/ssh). At a high-level:
+
+- Configure key-based authentication on the ssh server. The advantage of
+  this step is that logging-in will not require password.
+	[This page](https://code.visualstudio.com/docs/remote/troubleshooting#_configuring-key-based-authentication)
+	describes setting up key based authentication in detail.
+
+	One caveat for cygwin-based setup is that the client (referred to as "machine" in the page above)
+	may have two ssh keys: one in the windows file system and one in the cygwin file system.
+  I setup authentication for both (i.e., both the steps under
+	"Authorize your macOS or Linux machine to connect" from within the cygwin client
+	and steps under "Authorize your Windows machine to connect" within powershell).
+
+- Install the remote ssh extension in vscode.
+  In the activity bar, a new icon for "Remote Explorer" appears.
+
+- Click on that "Remote Explorer" icon, and then on the `+` sign next to the `SSH` under remote explorer.
+
+- In the command palette, type `ssh username@host` and press Enter.
+
+- It will then ask for the SSH configuration file to update, I chose the first one it showed me
+  (e.g., `C:\Users\aseemr\.ssh\config`).
+
+- This step is a "hack" that you may have to do if your username on the remote machine is
+  different from the local username. When trying to connect
+	(by pressing the connect button on the dialog box at the botton right after selecting the config file),
+	the extension may use the local username and hence will fail.
+
+	One way to get around this is by changing the config file from:
+
+	```
+	Host <hostname>
+  HostName <hostname>
+  User <username>
+  ```
+
+	to
+
+	```
+	Host <username>@<hostname>
+  HostName <hostname>
+  User <username>
+  ```
+
+	Note the change in the first line to explicitly add the remote username.
+
+  Reload the window after doing this, so that this config appears under the SSH connections in the explorer.
+	And then connecting works fine.
+
+- Once connected, we can open folders, files, work with F* as usual.
+  Make sure F* is in path on the remote machine.
 
 ## Planned features
 
