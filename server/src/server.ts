@@ -437,7 +437,8 @@ interface WordAndRange {
 	range: FStarRange;
 }
 
-// Sending a LookupQuery to fstar_lax_ide
+// Sending a LookupQuery to fstar_lax_ide, if flycheck is enabled
+// otherwise send lookup queries to fstar_ide
 function requestSymbolInfo(textDocument: TextDocument, position: Position, wordAndRange : WordAndRange) : void {
 	const uri = textDocument.uri;
 	const filePath = URI.parse(uri).fsPath;
@@ -455,7 +456,7 @@ function requestSymbolInfo(textDocument: TextDocument, position: Position, wordA
 			"symbol-range" : wordAndRange.range
 		}
 	};
-	sendRequestForDocument(textDocument, query, 'lax');
+	sendRequestForDocument(textDocument, query, configurationSettings.flyCheck ? 'lax' : undefined);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////
