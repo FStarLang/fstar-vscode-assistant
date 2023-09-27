@@ -1438,15 +1438,12 @@ connection.onDefinition((defParams : DefinitionParams) => {
 		const range = fstarRangeAsRange(defined_at);
 		let uri = textDoc.uri;
 		if (defined_at.fname != "<input>") {
-			if (doc_state) {
-				const base = doc_state?.config.cwd;
-				if (base) {
-					//concate the base and the relative path
-					uri = pathToFileURL(path.join(base, defined_at.fname)).toString();
-				}
-				else {
-					uri = pathToFileURL(defined_at.fname).toString();
-				}
+			// if we have a relative path, then qualify it to the base of the
+			// F* process's cwd
+			if (!path.isAbsolute(defined_at.fname) && doc_state && doc_state.config.cwd) {
+				const base = doc_state.config.cwd;
+				//concate the base and the relative path
+				uri = pathToFileURL(path.join(base, defined_at.fname)).toString();
 			}
 			else {
 				uri = pathToFileURL(defined_at.fname).toString();
