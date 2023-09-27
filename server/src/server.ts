@@ -76,6 +76,7 @@ interface IDEState {
 	auto_complete_info: Map<string, IdeAutoCompleteResponses>;
 	// A flag to indicate if the prefix of the buffer is stale
 	prefix_stale : boolean;
+	config: FStarConfig;
 }
 
 const documentStates: Map<string, IDEState> = new Map();
@@ -1204,7 +1205,8 @@ async function refreshDocumentState(textDocument : TextDocument) {
 						hover_symbol_info: new Map(),
 						hover_proofstate_info: new Map(),
 						auto_complete_info: new Map(),
-						prefix_stale: false
+						prefix_stale: false,
+						config: fstarConfig
 					});
 
 	// Set the event handlers for the fstar processes
@@ -1425,6 +1427,7 @@ connection.onHover(
 // LocationLink object instead of a Hover object
 connection.onDefinition((defParams : DefinitionParams) => {
 	const textDoc = documents.get(defParams.textDocument.uri);
+	const doc_state = documentStates.get(defParams.textDocument.uri);
 	if (!textDoc) { return []; }
 	const symbol = findIdeSymbolAtPosition(textDoc, defParams.position);
 	if (!symbol) { return []; }
@@ -1433,7 +1436,22 @@ connection.onDefinition((defParams : DefinitionParams) => {
 		const defined_at = sym["defined-at"];
 		if (!defined_at) { return []; }		
 		const range = fstarRangeAsRange(defined_at);
-		const uri = defined_at.fname == "<input>" ? textDoc.uri : pathToFileURL(defined_at.fname).toString();
+		let uri = textDoc.uri;
+		if (defined_at.fname != "<input>") {
+			if (doc_state) {
+				const base = doc_state?.config.cwd;
+				if (base) {
+					//concate the base and the relative path
+					uri = pathToFileURL(path.join(base, defined_at.fname)).toString();
+				}
+				else {
+					uri = pathToFileURL(defined_at.fname).toString();
+				}
+			}
+			else {
+				uri = pathToFileURL(defined_at.fname).toString();
+			}
+		}
 		const location = LocationLink.create(uri, range, range);
 		return [location];
 	}
