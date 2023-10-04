@@ -1061,10 +1061,13 @@ let hasWorkspaceFolderCapability = false;
 let hasDiagnosticRelatedInformationCapability = false;
 let supportsFullBuffer = true;
 
-function parseConfigFile(configFile: string) : FStarConfig {
-	const contents = fs.readFileSync(configFile, 'utf8');
-	const config = JSON.parse(contents);
-	return config;
+function parseConfigFile(configFile) {
+    const contents = fs.readFileSync(configFile, 'utf8');
+    const config = JSON.parse(contents, (key, value) =>
+        typeof value === "string"
+            ? value.replace(/\$([A-Z_]+[A-Z0-9_]*)|\${([A-Z0-9_]*)}/ig, (_, a, b) => process.env[a || b])
+            : value);
+    return config;
 }
 
 // Initialization of the LSP server: Called once when the workspace is opened
