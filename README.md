@@ -218,8 +218,43 @@ for launching `fstar.exe`. Here is a sample .fst.config.json file:
 * The `"include_dirs"` field contains all include directories to pass to `fstar_exe`,
   relative to the workspace root folder.
 
+You can reference environment variables in the config file and the extension will
+expand those variables to their values in the current process' environment. Environment
+variables are strings of upper-case letters, numbers, and the `_` character. References to them 
+are prefixed with `$` and optionally enclosed with `{}`. See below for an example.
+
+```
+{ "fstar_exe":"fstar.exe",
+  "options":["--cache_dir", ".cache.boot"],
+  "include_dirs":["${HOME}/fstar_playground", $USER_PROFILE/workspace] }
+```
+
 You can open multiple workspace folders, each with their own config file which applies only 
 to files within that folder.
+
+Additionally, you can open a single top-level workspace folder with multiple .fst.config.json file
+in several sub-directories, though only one .fst.config.json per directory. When opening a given file,
+the extension uses the .fst.config.json file closest to the file in the directory hierarchy.
+
+For example, if you have the following:
+
+```
+workspace_root/
+├─ dir_A/
+│  ├─ A.fst
+|
+├─ dir_B/
+│  ├─ B.fst
+|  ├─ B.fst.config.json
+├─ Project.fst.config.json
+├─ Main.fst
+```
+
+Then, `Project.fst.config.json` applies to `Main.fst` and `A.fst`,
+while `B.fst.config.json` applies to `B.fst`.
+
+
+
 
 ### Working with the vscode remote ssh extension
 
