@@ -591,7 +591,7 @@ function findConfigFile(e : TextDocument) : FStarConfig {
 			if (configurationSettings.debug) {
 				console.log("Using config file " + matches[0] + " for " + filePath);
 			}
-			const config = parseConfigFile(matches[0]);
+			const config = parseConfigFile(e, matches[0]);
 			if (!config.cwd) {
 				config.cwd = dir;
 			}
@@ -1061,12 +1061,43 @@ let hasWorkspaceFolderCapability = false;
 let hasDiagnosticRelatedInformationCapability = false;
 let supportsFullBuffer = true;
 
-function parseConfigFile(configFile) {
+function parseConfigFile(e:TextDocument, configFile : string) {
     const contents = fs.readFileSync(configFile, 'utf8');
-    const config = JSON.parse(contents, (key, value) =>
-        typeof value === "string"
-            ? value.replace(/\$([A-Z_]+[A-Z0-9_]*)|\${([A-Z0-9_]*)}/ig, (_, a, b) => process.env[a || b])
-            : value);
+	function substituteEnvVars(value: string) {
+		return value.replace(/\$([A-Z_]+[A-Z0-9_]*)|\${([A-Z0-9_]*)}/ig,
+							(_, a, b) => {
+								const resolved_env_var = a ? process.env[a] : process.env[b];
+								if (resolved_env_var) {
+									return resolved_env_var;
+								}
+								else {
+									sendAlert({message:"Failed to resolve environment variable " + (a || b), uri: e.uri});
+									return "";
+								}
+							});
+	}
+	function substituteEnvVarsInValue(value: any): any {
+		switch (typeof value) {
+			case "string":
+				return substituteEnvVars(value);
+			case "object":
+				if (Array.isArray(value)) {
+					return value.map(substituteEnvVarsInValue);
+				} else {
+					const result: { [key: string]: any } = {};
+					for (const [key, val] of Object.entries(value)) {
+						result[key] = substituteEnvVarsInValue(val);
+					}
+					return result;
+				}
+			default:
+				return value;
+		}
+	}
+	const config = JSON.parse(contents, (key, value) => substituteEnvVarsInValue(value));
+	if (configurationSettings.debug) {
+		console.log("Parsed config file: " + JSON.stringify(config));
+	}
     return config;
 }
 
