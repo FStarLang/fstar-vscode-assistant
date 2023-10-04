@@ -147,3 +147,22 @@ we have the following four custom messages send from server.ts to client.ts
 
 * `fstar-vscode-extension/statusFailed`: A message to indicate that checking has failed on a fragment,
    which causes the extension to clear any hourglass icons that remain.
+
+# Publishing an extension
+
+See https://code.visualstudio.com/api/working-with-extensions/publishing-extension
+
+Some notes:
+
+1. Run `vsce package <version number>`
+   - This will bump the version number in package.json and package-lock.json
+   
+   - It also tries to a git add once its changed these files, but this
+     step usually fails for me with some git error about paths 
+
+2. `git add` and `commit` the changes to package.json and package-lock.json
+
+3. Run `vsce package`: This time it should produce a fstar-vscode-assistant-<version>.vsix
+
+4. Upload the package to https://marketplace.visualstudio.com/manage/publishers/fstarlang
+   (You need credentials to do this. Ask one of the extension developers.)

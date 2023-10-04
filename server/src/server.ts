@@ -76,6 +76,7 @@ interface IDEState {
 	auto_complete_info: Map<string, IdeAutoCompleteResponses>;
 	// A flag to indicate if the prefix of the buffer is stale
 	prefix_stale : boolean;
+	config: FStarConfig;
 }
 
 const documentStates: Map<string, IDEState> = new Map();
@@ -101,9 +102,6 @@ interface FStarConfig {
 
 // All the open workspace folders
 let workspaceFolders : WorkspaceFolder [] = [];
-
-// Config files in the workspace root folders
-const workspaceConfigs: Map<string, FStarConfig> = new Map();
 
 ////////////////////////////////////////////////////////////////////////////////////
 // Response messages in the IDE protocol that fstar.exe uses
@@ -562,29 +560,53 @@ function findFilesByExtension(folderPath:string, extension:string) {
 	return matches;
 }
 
+function getEnclosingDirectories(filePath: string): string[] {
+	const result: string[] = [];
+	let currentPath = filePath;
+	while (currentPath !== path.dirname(currentPath)) {
+		currentPath = path.dirname(currentPath);
+		result.push(currentPath);
+	}
+	return result;
+}
+
 // Finds the .fst.config.json for a given file
-// by searching the workspace root folders for a *.fst.config.json file
+// by searching from that file's directory up to the workspace root
+// for a .fst.config.json file, taking the one nearest to the file
 function findConfigFile(e : TextDocument) : FStarConfig {
 	const filePath = URI.parse(e.uri).fsPath;
-	let result : FStarConfig = {
+	const allEnclosingDirectories = getEnclosingDirectories(filePath);
+	for (const dir of allEnclosingDirectories) {
+		if (configurationSettings.debug) {
+			console.log("Checking directory " + dir + " for config file");
+		}
+		//if dir not in workspaceFolders, break
+		if (!workspaceFolders.find((folder) => {
+			return checkFileInDirectory(URI.parse(folder.uri).fsPath, dir);
+		})) {
+			break;
+		}
+		const matches = findFilesByExtension(dir, '.fst.config.json');
+		if (matches.length > 0) {
+			if (configurationSettings.debug) {
+				console.log("Using config file " + matches[0] + " for " + filePath);
+			}
+			const config = parseConfigFile(matches[0]);
+			if (!config.cwd) {
+				config.cwd = dir;
+			}
+			return config;
+		}
+	}
+	const default_result : FStarConfig = {
 		options : [],
 		include_dirs : [],
 		fstar_exe : "fstar.exe",
 		cwd: path.dirname(filePath)
 	};
-	workspaceFolders.find((folder) => {
-		const folderPath = URI.parse(folder.uri).fsPath;
-		// console.log("Checking folder: " +folderPath+  " for file: " +filePath);
-		if (checkFileInDirectory(folderPath, filePath)) {
-			const r = workspaceConfigs.get(folderPath);	
-			if (r) {
-				result = r;
-			}
-			// console.log("Found config: " +JSON.stringify(result));
-		}
-	});
-	return result;
+	return default_result;
 }
+
 ////////////////////////////////////////////////////////////////////////////////////
 // Symbol table and proof state utilities
 ////////////////////////////////////////////////////////////////////////////////////
@@ -1039,6 +1061,12 @@ let hasWorkspaceFolderCapability = false;
 let hasDiagnosticRelatedInformationCapability = false;
 let supportsFullBuffer = true;
 
+function parseConfigFile(configFile: string) : FStarConfig {
+	const contents = fs.readFileSync(configFile, 'utf8');
+	const config = JSON.parse(contents);
+	return config;
+}
+
 // Initialization of the LSP server: Called once when the workspace is opened
 // Advertize the capabilities of the server
 //   - incremental text documentation sync
@@ -1048,35 +1076,10 @@ let supportsFullBuffer = true;
 //   - workspaces
 //   - reformatting
 connection.onInitialize((params: InitializeParams) => {
-	function initializeWorkspaceFolder(folder: WorkspaceFolder) {
-		const folderPath = URI.parse(folder.uri).fsPath;
-		const configFiles = findFilesByExtension(folderPath, ".fst.config.json");
-		if (configFiles.length == 0) {
-			return;
-		}
-		if (configFiles.length > 1) {
-			console.error("Warning: multiple .fst.config.json files found in " + folderPath);
-		}
-		const configFile = configFiles[0];
-		// console.log("Found config file " + configFile);
-		const contents = fs.readFileSync(configFile, 'utf8');
-		const config = JSON.parse(contents);
-		if (!config.cwd) {
-			config.cwd = folderPath;
-		}
-		return {folderPath, config};
-	}
 	const capabilities = params.capabilities;
 	if (params.workspaceFolders) {
-		params.workspaceFolders?.forEach(folder => {
-			const pathAndConfig = initializeWorkspaceFolder(folder);
-			if (pathAndConfig) {
-				workspaceConfigs.set(pathAndConfig.folderPath, pathAndConfig.config);
-			}
-		});
 		workspaceFolders = params.workspaceFolders;
 	}
-
 	// Does the client support the `workspace/configuration` request?
 	// If not, we fall back using global settings.
 	// This is left-over from the lsp-sample
@@ -1201,7 +1204,8 @@ async function refreshDocumentState(textDocument : TextDocument) {
 						hover_symbol_info: new Map(),
 						hover_proofstate_info: new Map(),
 						auto_complete_info: new Map(),
-						prefix_stale: false
+						prefix_stale: false,
+						config: fstarConfig
 					});
 
 	// Set the event handlers for the fstar processes
@@ -1422,6 +1426,7 @@ connection.onHover(
 // LocationLink object instead of a Hover object
 connection.onDefinition((defParams : DefinitionParams) => {
 	const textDoc = documents.get(defParams.textDocument.uri);
+	const doc_state = documentStates.get(defParams.textDocument.uri);
 	if (!textDoc) { return []; }
 	const symbol = findIdeSymbolAtPosition(textDoc, defParams.position);
 	if (!symbol) { return []; }
@@ -1430,7 +1435,19 @@ connection.onDefinition((defParams : DefinitionParams) => {
 		const defined_at = sym["defined-at"];
 		if (!defined_at) { return []; }		
 		const range = fstarRangeAsRange(defined_at);
-		const uri = defined_at.fname == "<input>" ? textDoc.uri : pathToFileURL(defined_at.fname).toString();
+		let uri = textDoc.uri;
+		if (defined_at.fname != "<input>") {
+			// if we have a relative path, then qualify it to the base of the
+			// F* process's cwd
+			if (!path.isAbsolute(defined_at.fname) && doc_state && doc_state.config.cwd) {
+				const base = doc_state.config.cwd;
+				//concate the base and the relative path
+				uri = pathToFileURL(path.join(base, defined_at.fname)).toString();
+			}
+			else {
+				uri = pathToFileURL(defined_at.fname).toString();
+			}
+		}
 		const location = LocationLink.create(uri, range, range);
 		return [location];
 	}
