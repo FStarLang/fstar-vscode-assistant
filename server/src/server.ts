@@ -1195,8 +1195,7 @@ async function refreshDocumentState(textDocument : TextDocument) {
 
 	// Construct the options for fstar.exe
 	const filePath = URI.parse(textDocument.uri);
-	const filename = path.basename(filePath.fsPath);
-	const options = ["--ide", filename];
+	const options = ["--ide", filePath.fsPath];
 	if (fstarConfig.options) {
 		fstarConfig.options.forEach((opt) => { options.push(opt); });
 	}
@@ -1252,7 +1251,7 @@ async function refreshDocumentState(textDocument : TextDocument) {
 	fstar_lax_ide.stderr.on('data', (data) => { console.error("fstar lax stderr: " +data); });
 	
 	// Send the initial dummy vfs-add request to the fstar processes
-	const vfs_add : VfsAdd = {"query":"vfs-add","args":{"filename":null,"contents":textDocument.getText()}};
+	const vfs_add : VfsAdd = {"query":"vfs-add","args":{"filename":filePath.fsPath,"contents":textDocument.getText()}};
 	sendRequestForDocument(textDocument, vfs_add);
 	sendRequestForDocument(textDocument, vfs_add, 'lax');
 }
