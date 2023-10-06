@@ -7,6 +7,7 @@ import * as path from 'path';
 import { workspace, ExtensionContext, Command } from 'vscode';
 import * as vscode from 'vscode';
 import {
+	DiagnosticRelatedInformation,
 	LanguageClient,
 	LanguageClientOptions,
 	ServerOptions,
@@ -240,6 +241,13 @@ function handleAlert(msg: AlertMessage) {
 function handleDiagnostics(msg: DiagnosticsMessage) {
 	const docDiagnostics : DocDiagnostics =
 		diagnosticsMap.get(msg.uri) ?? { lax_diagnostics: [], full_diagnostics: [] };
+	msg.diagnostics.forEach(element => {
+		if (element.relatedInformation) {
+			element.relatedInformation.forEach (ri => {
+				ri.location.uri = vscode.Uri.parse(ri.location.uri.toString());
+			});
+		}
+	});
 	if (msg.lax) {
 		docDiagnostics.lax_diagnostics = msg.diagnostics;
 	}
