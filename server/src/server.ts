@@ -6,6 +6,7 @@ import {
 	createConnection,
 	TextDocuments,
 	Diagnostic,
+	DiagnosticRelatedInformation,
 	DiagnosticSeverity,
 	ProposedFeatures,
 	InitializeParams,
@@ -751,6 +752,22 @@ function rangeAsFStarRange (rng: Range) : FStarRange {
 	};
 }
 
+function qualifyFilename(fname:string, textdocUri: string) : string {
+	const doc_state = documentStates.get(textdocUri);
+	if (fname != "<input>") {
+		// if we have a relative path, then qualify it to the base of the
+		// F* process's cwd
+		if (!path.isAbsolute(fname) && doc_state && doc_state.config.cwd) {
+			const base = doc_state.config.cwd;
+			//concate the base and the relative path
+			return pathToFileURL(path.join(base, fname)).toString();
+		}
+		else {
+			return pathToFileURL(fname).toString();
+		}
+	}
+	return textdocUri;
+}
 ////////////////////////////////////////////////////////////////////////////////////
 // Custom client/server protocol
 ////////////////////////////////////////////////////////////////////////////////////
@@ -997,31 +1014,48 @@ function handleIdeDiagnostics (textDocument : TextDocument, response : IdeError 
 	const diagnostics : Diagnostic[]= [];
 	response.forEach((err) => {
 		let diag : Diagnostic | undefined = undefined;
+		let diagUriAlt : string | undefined = undefined;
 		err.ranges.forEach ((rng) => {
 			if (!diag) {
 				// First range for this error, construct the diagnostic message.
 				let maybe_fname = "";
-				if (rng.fname != "<input>")
+				if (rng.fname != "<input>") {
 					maybe_fname = " (in file " + rng.fname + ")";
+					diagUriAlt = maybe_fname;
+				}
 				diag = {
 					severity: ideErrorLevelAsDiagnosticSeverity(err.level),
-					range: {
-						start: mkPosition(rng.beg),
-						end: mkPosition(rng.end)
-					},
-					message: err.message + maybe_fname
+					range: fstarRangeAsRange(rng),
+					message: err.message + maybe_fname,
+					relatedInformation: []
 				};
+
 			} else if (diag) {
-				// More ranges, just accumulate them into the message.
-				const seeAlso = "(See related location: " + rng.fname + ":" + rng.beg[0] + ":" + rng.beg[1] + ")";
-				diag.message = diag.message + "\n" + seeAlso;
+				const relatedLocation  = {
+					uri : qualifyFilename(rng.fname, textDocument.uri),
+					range : fstarRangeAsRange(rng)
+				};
+				const relatedInfo : DiagnosticRelatedInformation = {
+					location:relatedLocation,
+					message:"related location"
+				};
+				if (diag.relatedInformation) {
+					diag.relatedInformation.push(relatedInfo);
+				}
 			}
 			if (err.number == 128) { //Error 128 is unable to load dependences
 				sendAlert({message:err.message, uri: textDocument.uri});
 			}
 		});
 		if (diag) {
-			diagnostics.push(diag);
+			if (diagUriAlt) {
+				//This is not a diagnostic for the current file, so send it
+				//as the diagnostic for diagUriAlt
+				sendDiagnostics({uri:diagUriAlt, lax:lax, diagnostics:[diag]});
+			}
+			else {
+				diagnostics.push(diag);
+			}
 		}
 	});
 	const docState = documentStates.get(textDocument.uri);
@@ -1460,7 +1494,6 @@ connection.onHover(
 // LocationLink object instead of a Hover object
 connection.onDefinition((defParams : DefinitionParams) => {
 	const textDoc = documents.get(defParams.textDocument.uri);
-	const doc_state = documentStates.get(defParams.textDocument.uri);
 	if (!textDoc) { return []; }
 	const symbol = findIdeSymbolAtPosition(textDoc, defParams.position);
 	if (!symbol) { return []; }
@@ -1469,19 +1502,7 @@ connection.onDefinition((defParams : DefinitionParams) => {
 		const defined_at = sym["defined-at"];
 		if (!defined_at) { return []; }		
 		const range = fstarRangeAsRange(defined_at);
-		let uri = textDoc.uri;
-		if (defined_at.fname != "<input>") {
-			// if we have a relative path, then qualify it to the base of the
-			// F* process's cwd
-			if (!path.isAbsolute(defined_at.fname) && doc_state && doc_state.config.cwd) {
-				const base = doc_state.config.cwd;
-				//concate the base and the relative path
-				uri = pathToFileURL(path.join(base, defined_at.fname)).toString();
-			}
-			else {
-				uri = pathToFileURL(defined_at.fname).toString();
-			}
-		}
+		const uri = qualifyFilename(defined_at.fname, textDoc.uri);
 		const location = LocationLink.create(uri, range, range);
 		return [location];
 	}
