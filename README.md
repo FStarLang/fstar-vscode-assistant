@@ -317,6 +317,11 @@ Steps to configure the remote ssh extension are given in detail
 - Once connected, we can open folders, files, work with F* as usual.
   Make sure F* is in path on the remote machine.
 
+#### Some troubleshooting
+
+If you keep getting ENOENT error in vscode for fstar.exe, meaning that the extension is unable to find fstar.exe on the remote host,
+and you have added F* path on the remote host, try restarting the vscode ssh server (`Ctrl+Shift+P Remote-SSH: Kill VS Code Server on Host`).
+
 ## Planned features
 
 This extensions does not yet support the following features, though support is expected soon.
