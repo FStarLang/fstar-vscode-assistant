@@ -814,8 +814,8 @@ function sendClearDiagnostics(msg: ClearDiagnosticsMessage) {
 // Handling responses from the F* IDE protocol
 ///////////////////////////////////////////////////////////////////////////////////
 
-// All IDE messages are expected to be valid JSON objects
-function is_valid_ide_message(entry: string): boolean {
+// All messages from F* are expected to be valid JSON objects
+function is_valid_fstar_message(entry: string): boolean {
 	try {
 		JSON.parse(entry);
 		return true;
@@ -842,7 +842,7 @@ const handleFStarResponseForDocumentFactory: () => ((textDocument: TextDocument,
 
 		const valid_lines: string[] = [];
 		for (const line of lines) {
-			if (is_valid_ide_message(line)) {
+			if (is_valid_fstar_message(line)) {
 				// We assume that fragmented messages will always be delivered
 				// sequentially. Because of this, receiving a non-fragmented
 				// message while the buffer is non-empty results in the buffer
@@ -860,7 +860,7 @@ const handleFStarResponseForDocumentFactory: () => ((textDocument: TextDocument,
 				// The message fragment we received may be the last fragment
 				// needed to complete a message. We therefore check here to see
 				// if the buffer constitutes a valid message.
-				if (is_valid_ide_message(buffer)) {
+				if (is_valid_fstar_message(buffer)) {
 					valid_lines.push(buffer);
 					buffer = "";
 				}
