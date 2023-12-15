@@ -32,7 +32,7 @@ This three layered design has the following benefits:
 * Every document has its own F* process, providing isolation
 
 * We reuse the IDE protocol, which has been used and tested extensively over several years in the
-  context of fstar-mode.el.
+  context of fstar-mode.el. The IDE protocol is described here: https://github.com/FStarLang/FStar/wiki/Editor-support-for-F%2A#adding-support-for-new-ides
 
 On the downside, our use of the custom IDE protocol means that adapting this extension for use in other
 LSP-capable editors would require also re-writing server.ts, rather than being able to use fstar.exe
