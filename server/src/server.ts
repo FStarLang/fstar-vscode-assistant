@@ -1064,22 +1064,40 @@ function handleIdeDiagnostics (textDocument : TextDocument, response : IdeError 
 	const diagnostics : Diagnostic[]= [];
 	response.forEach((err) => {
 		let diag : Diagnostic | undefined = undefined;
-		let diagUriAlt : string | undefined = undefined;
+		let shouldAlertErrorInDifferentFile = false;
 		err.ranges.forEach ((rng) => {
 			if (!diag) {
 				// First range for this error, construct the diagnostic message.
-				let maybe_fname = "";
+				let mainRange;
+				const relatedInfo = [];
 				if (rng.fname != "<input>") {
-					maybe_fname = " (in file " + rng.fname + ")";
-					diagUriAlt = maybe_fname;
+					//This is a diagnostic raised on another file
+					shouldAlertErrorInDifferentFile = err.level == "error";
+					const defaultRange : FStarRange = {
+						fname: "<input>",
+						beg: [1,0],
+						end: [1,1]
+					};
+					mainRange = defaultRange;
+					const relationLocation  = {
+						uri : qualifyFilename(rng.fname, textDocument.uri),
+						range : fstarRangeAsRange(rng)
+					};
+					const ri : DiagnosticRelatedInformation = {
+						location:relationLocation,
+						message:"related location"
+					};
+					relatedInfo.push(ri);
+				}
+				else {
+					mainRange = rng;
 				}
 				diag = {
 					severity: ideErrorLevelAsDiagnosticSeverity(err.level),
-					range: fstarRangeAsRange(rng),
-					message: err.message + maybe_fname,
-					relatedInformation: []
+					range: fstarRangeAsRange(mainRange),
+					message: err.message,
+					relatedInformation: relatedInfo
 				};
-
 			} else if (diag) {
 				const relatedLocation  = {
 					uri : qualifyFilename(rng.fname, textDocument.uri),
@@ -1093,19 +1111,12 @@ function handleIdeDiagnostics (textDocument : TextDocument, response : IdeError 
 					diag.relatedInformation.push(relatedInfo);
 				}
 			}
-			if (err.number == 128) { //Error 128 is unable to load dependences
-				sendAlert({message:err.message, uri: textDocument.uri});
-			}
 		});
+		if (shouldAlertErrorInDifferentFile) {
+			sendAlert({message:err.message, uri: textDocument.uri});
+		}
 		if (diag) {
-			if (diagUriAlt) {
-				//This is not a diagnostic for the current file, so send it
-				//as the diagnostic for diagUriAlt
-				sendDiagnostics({uri:diagUriAlt, lax:lax, diagnostics:[diag]});
-			}
-			else {
-				diagnostics.push(diag);
-			}
+			diagnostics.push(diag);
 		}
 	});
 	const docState = documentStates.get(textDocument.uri);
