@@ -37,8 +37,9 @@ import {
 
 import * as cp from 'child_process';
 import * as pstree from 'ps-tree';
+import * as which from 'which';
 import path = require('path');
-// Import fs and path modules}
+// Import fs and path modules
 import * as fs from 'fs';
 import { pathToFileURL } from 'url';
 
@@ -1294,6 +1295,16 @@ async function refreshDocumentState(textDocument : TextDocument) {
 	if (configurationSettings.debug) {
 		console.log("Spawning fstar with options: " +options);
 	}
+	// check if fstar_exe can be found in the current path
+	// using which
+	try {
+		const fstar_exe_path = which.sync(fstarConfig.fstar_exe);
+	}
+	catch (err) {
+		sendAlert({message:"Failed to find fstar.exe in path: " + err, uri: textDocument.uri});
+		return;
+	}
+
 	const fstar_ide =
 		cp.spawn(
 			fstarConfig.fstar_exe,
