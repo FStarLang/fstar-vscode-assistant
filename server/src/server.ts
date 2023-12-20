@@ -810,18 +810,67 @@ function sendClearDiagnostics(msg: ClearDiagnosticsMessage) {
 	connection.sendNotification('fstar-vscode-assistant/clearDiagnostics', msg);
 }
 
- ///////////////////////////////////////////////////////////////////////////////////
- // Handling responses from the F* IDE protocol
- ///////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////
+// Handling responses from the F* IDE protocol
+///////////////////////////////////////////////////////////////////////////////////
 
- // Event handler for stdout on fstar_ide
- function handleFStarResponseForDocument(textDocument: TextDocument, data:string, lax:boolean) {
-	if (configurationSettings.debug) {
-		console.log("<<< " + (lax? "lax" : "") + "uri:<" +textDocument.uri + ">:" +data);
+// All messages from F* are expected to be valid JSON objects
+function is_valid_fstar_message(entry: string): boolean {
+	try {
+		JSON.parse(entry);
+		return true;
 	}
-	const lines = data.toString().split('\n');
-	lines.forEach(line => { handleOneResponseForDocument(textDocument, line, lax);  });
+	catch(err) {
+		return false;
+	}
 }
+
+// Event handler for stdout on fstar_ide. Created as a closure to keep the
+// buffer scoped only to this function. The factory function exists to make
+// unit-testing easier (creating a new function is like resetting the closure
+// state).
+const handleFStarResponseForDocumentFactory: () => ((textDocument: TextDocument, data:string, lax:boolean) => void) = function () {
+	// Stateful buffer to store partial messages. Messages appear to be fragmented
+	// into 8192 byte chunks if they exceed this size.
+	let buffer = "";
+
+	return function(textDocument: TextDocument, data:string, lax:boolean) {
+		if (configurationSettings.debug) {
+			console.log("<<< " + (lax? "lax" : "") + "uri:<" +textDocument.uri + ">:" +data);
+		}
+		const lines = data.toString().split('\n');
+
+		const valid_lines: string[] = [];
+		for (const line of lines) {
+			if (is_valid_fstar_message(line)) {
+				// We assume that fragmented messages will always be delivered
+				// sequentially. Because of this, receiving a non-fragmented
+				// message while the buffer is non-empty results in the buffer
+				// being discarded (since we assume that some error occured).
+				if (buffer !== "") {
+					console.error("Partially buffered message discarded: " + buffer);
+				}
+				buffer = "";
+				valid_lines.push(line);
+			} else {
+				// We assume that invalid messages are just message fragments.
+				// We therefore add this fragment to the buffer until the full
+				// message is received.
+				buffer += line;
+				// The message fragment we received may be the last fragment
+				// needed to complete a message. We therefore check here to see
+				// if the buffer constitutes a valid message.
+				if (is_valid_fstar_message(buffer)) {
+					valid_lines.push(buffer);
+					buffer = "";
+				}
+			}
+		}
+
+		valid_lines.forEach(line => { handleOneResponseForDocument(textDocument, line, lax); });
+	};
+};
+const handleFStarResponseForDocument: (textDocument: TextDocument, data:string, lax:boolean) => void = handleFStarResponseForDocumentFactory();
 
 // Main event dispatch for IDE responses
 function handleOneResponseForDocument(textDocument: TextDocument, data:string, lax: boolean) {
