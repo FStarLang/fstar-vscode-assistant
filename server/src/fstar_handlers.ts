@@ -15,7 +15,11 @@ import { fstarVSCodeAssistantSettings } from './settings';
 import { Server } from './server';
 import { ClientConnection, StatusOkMessage, ok_kind } from './client_connection';
 import { mkPosition, fstarRangeAsRange, qualifyFilename } from './utils';
-import { FStar } from './fstar';
+
+// Cyclic dependency to support mocking out functions within this module when
+// testing other functions within the module. Suggested as a solution in this
+// post: https://stackoverflow.com/questions/51269431/jest-mock-inner-function
+import * as fstar_handlers from './fstar_handlers';
 
 ///////////////////////////////////////////////////////////////////////////////////
 // Handling responses from the F* IDE protocol
@@ -47,7 +51,7 @@ export function handleFStarResponseForDocumentFactory(configurationSettings: fst
 	// into 8192 byte chunks if they exceed this size.
 	let buffer = "";
 
-	const handleOneResponseForDocument = handleOneResponseForDocumentFactory(configurationSettings, server, connection);
+	const handleOneResponseForDocument = fstar_handlers.handleOneResponseForDocumentFactory(configurationSettings, server, connection);
 	return function (textDocument: TextDocument, data: string, lax: boolean) {
 		if (configurationSettings.debug) {
 			console.log("<<< " + (lax ? "lax" : "") + "uri:<" + textDocument.uri + ">:" + data);
@@ -89,7 +93,7 @@ export function handleFStarResponseForDocumentFactory(configurationSettings: fst
 // to close a configurationSettings object within the returned function, thus
 // preserving the semantics of the original code which used a global
 // configurationSettings variable.
-function handleOneResponseForDocumentFactory(configurationSettings: fstarVSCodeAssistantSettings, server: Server, connection: ClientConnection): ((textDocument: TextDocument, data: string, lax: boolean) => void) {
+export function handleOneResponseForDocumentFactory(configurationSettings: fstarVSCodeAssistantSettings, server: Server, connection: ClientConnection): ((textDocument: TextDocument, data: string, lax: boolean) => void) {
 	const handleIdeProofState = handleIdeProofStateFactory(server);
 	const handleIdeSymbol = handleIdeSymbolFactory(server);
 	const handleIdeProgress = handleIdeProgressFactory(configurationSettings, server, connection);

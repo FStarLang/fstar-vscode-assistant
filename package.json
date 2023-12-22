@@ -140,16 +140,15 @@
 		"compile": "tsc -b",
 		"watch": "tsc -b -w",
 		"lint": "eslint ./client/src ./server/src --ext .ts,.tsx",
-		"postinstall": "cd client && npm install && cd ../server && npm install && cd .."
+		"postinstall": "cd client && npm install && cd ../server && npm install && cd ..",
+		"test": "cd server && npm test"
 	},
 	"devDependencies": {
-		"@types/mocha": "^9.1.0",
 		"@types/node": "^16.11.7",
 		"@types/which": "^3.0.3",
 		"@typescript-eslint/eslint-plugin": "^5.42.0",
 		"@typescript-eslint/parser": "^5.42.0",
 		"eslint": "^8.26.0",
-		"mocha": "^9.2.1",
 		"typescript": "^4.8.4"
 	}
 }
