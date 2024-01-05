@@ -476,13 +476,13 @@ export class Server {
 		// the configuration settings should be visible inside the generated
 		// handler. This preserves the semantics of closing over a global
 		// configurationSettings variable.
-		const handleFStarResponseForDocument = handleFStarResponseForDocumentFactory(this.configurationSettings, this, this.connection);
+		const handleFStarResponseForDocument = handleFStarResponseForDocumentFactory();
 
 		fstar.proc.stdin?.setDefaultEncoding('utf-8');
-		fstar.proc.stdout?.on('data', (data) => { handleFStarResponseForDocument(textDocument, data, false); });
+		fstar.proc.stdout?.on('data', (data) => { handleFStarResponseForDocument(textDocument, data, false, this); });
 		fstar.proc.stderr?.on('data', (data) => { console.error("fstar stderr: " + data); });
 		fstar_lax.proc.stdin?.setDefaultEncoding('utf-8');
-		fstar_lax.proc.stdout?.on('data', (data) => { handleFStarResponseForDocument(textDocument, data, true); });
+		fstar_lax.proc.stdout?.on('data', (data) => { handleFStarResponseForDocument(textDocument, data, true, this); });
 		fstar_lax.proc.stderr?.on('data', (data) => { console.error("fstar lax stderr: " + data); });
 
 		// Send the initial dummy vfs-add request to the fstar processes

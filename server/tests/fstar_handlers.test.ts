@@ -22,18 +22,21 @@ const mockServer = new (jest.mocked(Server))(mockConnection, new TextDocuments(T
 
 beforeEach(() => {
 	jest.clearAllMocks();
+
+	// This test suite relies on being able to access configurationSettings. The
+	// mock sets configurationSettings to `undefined`, so we instead provide a
+	// default configuration for these tests.
+	mockServer.configurationSettings = defaultSettings;
 });
 
 describe('handleFStarResponseForDocument tests', () => {
 	// `handleFStarResponseForDocument` calls `handleOneResponseForDocument`. We
 	// therefore mock `handleOneResponseForDocument` out to simplify these
-	// tests. The factory function is mocked to just return the mocked
-	// `handleOneResponseForDocument` function.
-	const handleOneResponseForDocumentMock = jest.fn();
-	const _ = jest.spyOn(fstar_handlers, 'handleOneResponseForDocumentFactory').mockReturnValue(handleOneResponseForDocumentMock);
+	// tests.
+	const handleOneResponseForDocumentMock = jest.spyOn(fstar_handlers, 'handleOneResponseForDocument').mockReturnValue(undefined);
 
 	// The function we'll be testing, complete with mocked dependencies
-	const handleFStarResponseForDocument = fstar_handlers.handleFStarResponseForDocumentFactory(defaultSettings, mockServer, mockConnection);
+	const handleFStarResponseForDocument = fstar_handlers.handleFStarResponseForDocumentFactory();
 
 	// Common test parameters
 	const td = TextDocument.create("test", "test", 0, "test");
@@ -42,10 +45,10 @@ describe('handleFStarResponseForDocument tests', () => {
 	test('test valid message', () => {
 		const valid_message = '{"kind": "message"}';
 
-		handleFStarResponseForDocument(td, valid_message, lax);
+		handleFStarResponseForDocument(td, valid_message, lax, mockServer);
 		// Valid messages are passed on for further handling
 		expect(handleOneResponseForDocumentMock).toHaveBeenCalledTimes(1);
-		expect(handleOneResponseForDocumentMock).toHaveBeenLastCalledWith(td, valid_message, lax);
+		expect(handleOneResponseForDocumentMock).toHaveBeenLastCalledWith(td, valid_message, lax, mockServer);
 	});
 
 	test('test fragmented message', () => {
@@ -55,13 +58,13 @@ describe('handleFStarResponseForDocument tests', () => {
 
 		// Fragments are buffered until a full valid message is received, then it is
 		// passed on for further handling.
-		handleFStarResponseForDocument(td, fragment_0, lax);
+		handleFStarResponseForDocument(td, fragment_0, lax, mockServer);
 		expect(handleOneResponseForDocumentMock).toHaveBeenCalledTimes(0);
-		handleFStarResponseForDocument(td, fragment_1, lax);
+		handleFStarResponseForDocument(td, fragment_1, lax, mockServer);
 		expect(handleOneResponseForDocumentMock).toHaveBeenCalledTimes(0);
-		handleFStarResponseForDocument(td, fragment_2, lax);
+		handleFStarResponseForDocument(td, fragment_2, lax, mockServer);
 		expect(handleOneResponseForDocumentMock).toHaveBeenCalledTimes(1);
-		expect(handleOneResponseForDocumentMock).toHaveBeenLastCalledWith(td, fragment_0 + fragment_1 + fragment_2, lax);
+		expect(handleOneResponseForDocumentMock).toHaveBeenLastCalledWith(td, fragment_0 + fragment_1 + fragment_2, lax, mockServer);
 	});
 
 	test('test out-of-order fragmented messages are not handled', () => {
@@ -72,11 +75,11 @@ describe('handleFStarResponseForDocument tests', () => {
 		// Fragments are assumed to be received in-order, so out-of-order
 		// fragments have undefined behavior. In this test case, no valid
 		// message can be collected.
-		handleFStarResponseForDocument(td, fragment_2, lax);
+		handleFStarResponseForDocument(td, fragment_2, lax, mockServer);
 		expect(handleOneResponseForDocumentMock).toHaveBeenCalledTimes(0);
-		handleFStarResponseForDocument(td, fragment_1, lax);
+		handleFStarResponseForDocument(td, fragment_1, lax, mockServer);
 		expect(handleOneResponseForDocumentMock).toHaveBeenCalledTimes(0);
-		handleFStarResponseForDocument(td, fragment_0, lax);
+		handleFStarResponseForDocument(td, fragment_0, lax, mockServer);
 		expect(handleOneResponseForDocumentMock).toHaveBeenCalledTimes(0);
 	});
 
@@ -88,20 +91,20 @@ describe('handleFStarResponseForDocument tests', () => {
 
 		// Fragments are assumed to be received in-order and before other
 		// messages, so a valid message results in the buffer being flushed.
-		handleFStarResponseForDocument(td, valid_message, lax);
+		handleFStarResponseForDocument(td, valid_message, lax, mockServer);
 		expect(handleOneResponseForDocumentMock).toHaveBeenCalledTimes(1);
-		expect(handleOneResponseForDocumentMock).toHaveBeenLastCalledWith(td, valid_message, lax);
+		expect(handleOneResponseForDocumentMock).toHaveBeenLastCalledWith(td, valid_message, lax, mockServer);
 
-		handleFStarResponseForDocument(td, fragment_0, lax);
+		handleFStarResponseForDocument(td, fragment_0, lax, mockServer);
 		expect(handleOneResponseForDocumentMock).toHaveBeenCalledTimes(1);
 
-		handleFStarResponseForDocument(td, valid_message, lax);
+		handleFStarResponseForDocument(td, valid_message, lax, mockServer);
 		expect(handleOneResponseForDocumentMock).toHaveBeenCalledTimes(2);
-		expect(handleOneResponseForDocumentMock).toHaveBeenLastCalledWith(td, valid_message, lax);
+		expect(handleOneResponseForDocumentMock).toHaveBeenLastCalledWith(td, valid_message, lax, mockServer);
 
-		handleFStarResponseForDocument(td, fragment_1, lax);
+		handleFStarResponseForDocument(td, fragment_1, lax, mockServer);
 		expect(handleOneResponseForDocumentMock).toHaveBeenCalledTimes(2);
-		handleFStarResponseForDocument(td, fragment_2, lax);
+		handleFStarResponseForDocument(td, fragment_2, lax, mockServer);
 		expect(handleOneResponseForDocumentMock).toHaveBeenCalledTimes(2);
 
 	});
@@ -116,9 +119,9 @@ describe('handleFStarResponseForDocument tests', () => {
 
 		// Messages that are separated by newlines should be processed just as
 		// if they were received as separate messages.
-		handleFStarResponseForDocument(td, combined_messages, lax);
+		handleFStarResponseForDocument(td, combined_messages, lax, mockServer);
 		expect(handleOneResponseForDocumentMock).toHaveBeenCalledTimes(2);
-		expect(handleOneResponseForDocumentMock).toHaveBeenNthCalledWith(1, td, valid_message, lax);
-		expect(handleOneResponseForDocumentMock).toHaveBeenNthCalledWith(2, td, fragment_0 + fragment_1 + fragment_2, lax);
+		expect(handleOneResponseForDocumentMock).toHaveBeenNthCalledWith(1, td, valid_message, lax, mockServer);
+		expect(handleOneResponseForDocumentMock).toHaveBeenNthCalledWith(2, td, fragment_0 + fragment_1 + fragment_2, lax, mockServer);
 	});
 });

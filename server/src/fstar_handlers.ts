@@ -46,14 +46,23 @@ function is_valid_fstar_message(entry: string): boolean {
 // buffer scoped only to this function. The factory function exists to make
 // unit-testing easier (creating a new function is like resetting the closure
 // state).
-export function handleFStarResponseForDocumentFactory(configurationSettings: fstarVSCodeAssistantSettings, server: Server, connection: ClientConnection): ((textDocument: TextDocument, data: string, lax: boolean) => void) {
-	// Stateful buffer to store partial messages. Messages appear to be fragmented
-	// into 8192 byte chunks if they exceed this size.
+//
+// The server parameter is passed freshly with every request to avoid potential
+// rebinding errors in the future. Furthermore, server is passed instead of
+// configurationSettings (which is also stored on the server instance) to avoid
+// accidentally closing over stale configurationSettings arguments when this
+// function is called (since they can be rebound within the server).
+export function handleFStarResponseForDocumentFactory(): ((textDocument: TextDocument, data: string, lax: boolean, server: Server) => void) {
+	// TODO(klinvill): fragmentation code should probably be refactored into a
+	// separate method, or removed as per Gabriel's suggestion (if another
+	// solution can be found).
+	//
+	// Stateful buffer to store partial messages. Messages appear to be
+	// fragmented into 8192 byte chunks if they exceed this size.
 	let buffer = "";
 
-	const handleOneResponseForDocument = fstar_handlers.handleOneResponseForDocumentFactory(configurationSettings, server, connection);
-	return function (textDocument: TextDocument, data: string, lax: boolean) {
-		if (configurationSettings.debug) {
+	return function (textDocument: TextDocument, data: string, lax: boolean, server: Server) {
+		if (server.configurationSettings.debug) {
 			console.log("<<< " + (lax ? "lax" : "") + "uri:<" + textDocument.uri + ">:" + data);
 		}
 		const lines = data.toString().split('\n');
@@ -85,68 +94,60 @@ export function handleFStarResponseForDocumentFactory(configurationSettings: fst
 			}
 		}
 
-		valid_lines.forEach(line => { handleOneResponseForDocument(textDocument, line, lax); });
+		// Cyclic dependency on handleOneResponseForDocument to support mocking
+		// out the function when testing. Suggested as a solution in this post:
+		// https://stackoverflow.com/questions/51269431/jest-mock-inner-function
+		valid_lines.forEach(line => { fstar_handlers.handleOneResponseForDocument(textDocument, line, lax, server); });
 	};
 }
 
-// Factory for main event dispatch for IDE responses. The factory method exists
-// to close a configurationSettings object within the returned function, thus
-// preserving the semantics of the original code which used a global
-// configurationSettings variable.
-export function handleOneResponseForDocumentFactory(configurationSettings: fstarVSCodeAssistantSettings, server: Server, connection: ClientConnection): ((textDocument: TextDocument, data: string, lax: boolean) => void) {
-	const handleIdeProofState = handleIdeProofStateFactory(server);
-	const handleIdeSymbol = handleIdeSymbolFactory(server);
-	const handleIdeProgress = handleIdeProgressFactory(configurationSettings, server, connection);
-	const handleIdeDiagnostics = handleIdeDiagnosticsFactory(server, connection);
-	const handleIdeAutoComplete = handleIdeAutoCompleteFactory(server);
-
-	return function (textDocument: TextDocument, data: string, lax: boolean) {
-		if (data == "") { return; }
-		let r: IdeResponse;
-		try {
-			r = JSON.parse(data);
-		}
-		catch (err) {
-			console.error("Error parsing response: " + err);
+// Main event dispatch for F* IDE responses.
+export function handleOneResponseForDocument(textDocument: TextDocument, data: string, lax: boolean, server: Server) {
+	if (data == "") { return; }
+	let r: IdeResponse;
+	try {
+		r = JSON.parse(data);
+	}
+	catch (err) {
+		console.error("Error parsing response: " + err);
+		return;
+	}
+	if (r.kind == "protocol-info") {
+		return handleIdeProtocolInfo(textDocument, r as ProtocolInfo, server);
+	}
+	else if (r.kind == "message" && r.level == "progress") {
+		return handleIdeProgress(textDocument, r.contents as IdeProgress, lax, server);
+	}
+	else if (r.kind == "message" && r.level == "proof-state") {
+		if (!r.contents) { return; }
+		return handleIdeProofState(textDocument, r.contents as IdeProofState, server);
+	}
+	else if (r.kind == "response") {
+		if (!r.response) {
+			if (server.configurationSettings.debug) {
+				console.log("Unexpected response: " + JSON.stringify(r));
+			}
 			return;
 		}
-		if (r.kind == "protocol-info") {
-			return handleIdeProtocolInfo(textDocument, r as ProtocolInfo, server);
-		}
-		else if (r.kind == "message" && r.level == "progress") {
-			return handleIdeProgress(textDocument, r.contents as IdeProgress, lax);
-		}
-		else if (r.kind == "message" && r.level == "proof-state") {
-			if (!r.contents) { return; }
-			return handleIdeProofState(textDocument, r.contents as IdeProofState);
-		}
-		else if (r.kind == "response") {
-			if (!r.response) {
-				if (configurationSettings.debug) {
-					console.log("Unexpected response: " + JSON.stringify(r));
-				}
-				return;
-			}
-			switch (decideIdeReponseType(r.response)) {
-				case 'symbol':
-					return handleIdeSymbol(textDocument, r.response as IdeSymbol);
+		switch (decideIdeReponseType(r.response)) {
+			case 'symbol':
+				return handleIdeSymbol(textDocument, r.response as IdeSymbol, server);
 
-				case 'error':
-					return handleIdeDiagnostics(textDocument, r.response as IdeError[], lax);
+			case 'error':
+				return handleIdeDiagnostics(textDocument, r.response as IdeError[], lax, server);
 
-				case 'auto-complete':
-					return handleIdeAutoComplete(textDocument, r.response as IdeAutoCompleteResponses);
-			}
+			case 'auto-complete':
+				return handleIdeAutoComplete(textDocument, r.response as IdeAutoCompleteResponses, server);
 		}
-		else if (r.kind == "message" && r.level == "info") {
-			console.log("Info: " + r.contents);
+	}
+	else if (r.kind == "message" && r.level == "info") {
+		console.log("Info: " + r.contents);
+	}
+	else {
+		if (server.configurationSettings.debug) {
+			console.log("Unhandled response: " + r.kind);
 		}
-		else {
-			if (configurationSettings.debug) {
-				console.log("Unhandled response: " + r.kind);
-			}
-		}
-	};
+	}
 }
 
 function decideIdeReponseType(response: IdeQueryResponseTypes): 'symbol' | 'error' | 'auto-complete' {
@@ -178,28 +179,24 @@ function handleIdeProtocolInfo(textDocument: TextDocument, pi: ProtocolInfo, ser
 }
 
 // If we get a response to a symbol query, we store it in the symbol table map
-function handleIdeSymbolFactory(server: Server): ((textDocument: TextDocument, response: IdeSymbol) => void) {
-	return function (textDocument: TextDocument, response: IdeSymbol) {
-		// console.log("Got ide symbol " +JSON.stringify(response));
-		const rng = JSON.stringify(response["symbol-range"]);
-		const hoverSymbolMap = server.getDocumentState(textDocument.uri)?.hover_symbol_info;
-		if (hoverSymbolMap) {
-			hoverSymbolMap.set(rng, response);
-		}
-	};
+function handleIdeSymbol(textDocument: TextDocument, response: IdeSymbol, server: Server) {
+	// console.log("Got ide symbol " +JSON.stringify(response));
+	const rng = JSON.stringify(response["symbol-range"]);
+	const hoverSymbolMap = server.getDocumentState(textDocument.uri)?.hover_symbol_info;
+	if (hoverSymbolMap) {
+		hoverSymbolMap.set(rng, response);
+	}
 }
 
 // If we get a proof state dump message, we store it in the proof state map
-function handleIdeProofStateFactory(server: Server): ((textDocument: TextDocument, response: IdeProofState) => void) {
-	return function (textDocument: TextDocument, response: IdeProofState) {
-		// console.log("Got ide proof state " + JSON.stringify(response));
-		const range_key = response.location.beg[0];
-		const hoverProofStateMap = server.getDocumentState(textDocument.uri)?.hover_proofstate_info;
-		if (hoverProofStateMap) {
-			// console.log("Setting proof state hover info at line: " +range_key);
-			hoverProofStateMap.set(range_key, response);
-		}
-	};
+function handleIdeProofState(textDocument: TextDocument, response: IdeProofState, server: Server) {
+	// console.log("Got ide proof state " + JSON.stringify(response));
+	const range_key = response.location.beg[0];
+	const hoverProofStateMap = server.getDocumentState(textDocument.uri)?.hover_proofstate_info;
+	if (hoverProofStateMap) {
+		// console.log("Setting proof state hover info at line: " +range_key);
+		hoverProofStateMap.set(range_key, response);
+	}
 }
 
 // If a declaration in a full-buffer is verified, fstar_ide sends
@@ -211,193 +208,187 @@ function handleIdeProofStateFactory(server: Server): ((textDocument: TextDocumen
 //
 // We use that to send a status-ok which will clear the hourglass icon
 // and show a checkmark in the gutter for the locations we send
-function handleIdeProgressFactory(configurationSettings: fstarVSCodeAssistantSettings, server: Server, connection: ClientConnection): ((textDocument: TextDocument, contents: IdeProgress, lax: boolean) => void) {
-	return function (textDocument: TextDocument, contents: IdeProgress, lax: boolean) {
-		const doc_state = server.getDocumentState(textDocument.uri);
-		if (!doc_state) { return; }
-		if (contents.stage == "full-buffer-started") {
-			if (lax) {
-				doc_state.fstar_lax_diagnostics = [];
-			}
-			else {
-				doc_state.fstar_diagnostics = [];
-			}
-			return;
+function handleIdeProgress(textDocument: TextDocument, contents: IdeProgress, lax: boolean, server: Server) {
+	const doc_state = server.getDocumentState(textDocument.uri);
+	if (!doc_state) { return; }
+	if (contents.stage == "full-buffer-started") {
+		if (lax) {
+			doc_state.fstar_lax_diagnostics = [];
 		}
-		if (contents.stage == "full-buffer-finished") {
-			if (lax) {
-				connection.sendDiagnostics({
-					uri: textDocument.uri,
-					lax: true,
-					diagnostics: doc_state.fstar_lax_diagnostics
-				});
-			}
-			else {
-				connection.sendDiagnostics({
-					uri: textDocument.uri,
-					lax: false,
-					diagnostics: doc_state.fstar_diagnostics
-				});
-			}
-			return;
+		else {
+			doc_state.fstar_diagnostics = [];
 		}
-		if (lax) { return; }
-		// We don't send intermediate diagnostics and gutter icons for flycheck progress
-		if (contents.stage == "full-buffer-fragment-ok" ||
-			contents.stage == "full-buffer-fragment-lax-ok") {
-			if (doc_state.prefix_stale) { return; }
-			const rng = contents.ranges;
-			if (!contents["code-fragment"]) { return; }
-			const code_fragment = contents["code-fragment"];
-			const currentText = textDocument.getText(fstarRangeAsRange(code_fragment.range));
-			// compute an MD5 digest of currentText.trim
-			const md5 = crypto.createHash('md5');
-			md5.update(currentText.trim());
-			const digest = md5.digest('hex');
-			if (digest != code_fragment['code-digest']) {
-				if (configurationSettings.debug) {
-					console.log("Not setting gutter ok icon: Digest mismatch at range " + JSON.stringify(rng));
-				}
-				doc_state.prefix_stale = true;
-				return;
-			}
-			const ok_range = Range.create(mkPosition(rng.beg), mkPosition(rng.end));
-			let ok_kind: ok_kind;
-			if (contents.stage == "full-buffer-fragment-lax-ok") { ok_kind = "light-checked"; }
-			else { ok_kind = "checked"; }
-			const msg: StatusOkMessage = {
+		return;
+	}
+	if (contents.stage == "full-buffer-finished") {
+		if (lax) {
+			server.connection.sendDiagnostics({
 				uri: textDocument.uri,
-				ok_kind: ok_kind,
-				ranges: [ok_range]
-			};
-			connection.sendStatusOk(msg);
-			return;
+				lax: true,
+				diagnostics: doc_state.fstar_lax_diagnostics
+			});
 		}
-		if (contents.stage == "full-buffer-fragment-started") {
-			const rng = contents.ranges;
-			const ok_range = Range.create(mkPosition(rng.beg), mkPosition(rng.end));
-			const msg = {
+		else {
+			server.connection.sendDiagnostics({
 				uri: textDocument.uri,
-				ranges: [ok_range]
-			};
-			connection.sendStatusInProgress(msg);
-			//If there's any proof state for the range that's starting
-			//clear it, because we'll get updates from fstar_ide
-			server.clearIdeProofProofStateAtRange(textDocument, rng);
+				lax: false,
+				diagnostics: doc_state.fstar_diagnostics
+			});
+		}
+		return;
+	}
+	if (lax) { return; }
+	// We don't send intermediate diagnostics and gutter icons for flycheck progress
+	if (contents.stage == "full-buffer-fragment-ok" ||
+		contents.stage == "full-buffer-fragment-lax-ok") {
+		if (doc_state.prefix_stale) { return; }
+		const rng = contents.ranges;
+		if (!contents["code-fragment"]) { return; }
+		const code_fragment = contents["code-fragment"];
+		const currentText = textDocument.getText(fstarRangeAsRange(code_fragment.range));
+		// compute an MD5 digest of currentText.trim
+		const md5 = crypto.createHash('md5');
+		md5.update(currentText.trim());
+		const digest = md5.digest('hex');
+		if (digest != code_fragment['code-digest']) {
+			if (server.configurationSettings.debug) {
+				console.log("Not setting gutter ok icon: Digest mismatch at range " + JSON.stringify(rng));
+			}
+			doc_state.prefix_stale = true;
 			return;
 		}
-		if (contents.stage == "full-buffer-fragment-failed") {
-			const rng = contents.ranges;
-			const ok_range = Range.create(mkPosition(rng.beg), mkPosition(rng.end));
-			const msg = {
-				uri: textDocument.uri,
-				ranges: [ok_range]
-			};
-			connection.sendStatusFailed(msg);
-			return;
-		}
-	};
+		const ok_range = Range.create(mkPosition(rng.beg), mkPosition(rng.end));
+		let ok_kind: ok_kind;
+		if (contents.stage == "full-buffer-fragment-lax-ok") { ok_kind = "light-checked"; }
+		else { ok_kind = "checked"; }
+		const msg: StatusOkMessage = {
+			uri: textDocument.uri,
+			ok_kind: ok_kind,
+			ranges: [ok_range]
+		};
+		server.connection.sendStatusOk(msg);
+		return;
+	}
+	if (contents.stage == "full-buffer-fragment-started") {
+		const rng = contents.ranges;
+		const ok_range = Range.create(mkPosition(rng.beg), mkPosition(rng.end));
+		const msg = {
+			uri: textDocument.uri,
+			ranges: [ok_range]
+		};
+		server.connection.sendStatusInProgress(msg);
+		//If there's any proof state for the range that's starting
+		//clear it, because we'll get updates from fstar_ide
+		server.clearIdeProofProofStateAtRange(textDocument, rng);
+		return;
+	}
+	if (contents.stage == "full-buffer-fragment-failed") {
+		const rng = contents.ranges;
+		const ok_range = Range.create(mkPosition(rng.beg), mkPosition(rng.end));
+		const msg = {
+			uri: textDocument.uri,
+			ranges: [ok_range]
+		};
+		server.connection.sendStatusFailed(msg);
+		return;
+	}
 }
 
 // If we get errors and warnings from F*, we send them to VSCode
 // as diagnostics, which will show them as squiggles in the editor
-function handleIdeDiagnosticsFactory(server: Server, connection: ClientConnection): ((textDocument: TextDocument, response: IdeError[], lax: boolean) => void) {
-	return function (textDocument: TextDocument, response: IdeError[], lax: boolean) {
-		function ideErrorLevelAsDiagnosticSeverity(level: string): DiagnosticSeverity {
-			switch (level) {
-				case "warning": return DiagnosticSeverity.Warning;
-				case "error": return DiagnosticSeverity.Error;
-				case "info": return DiagnosticSeverity.Information;
-				default: return DiagnosticSeverity.Error;
-			}
+function handleIdeDiagnostics(textDocument: TextDocument, response: IdeError[], lax: boolean, server: Server) {
+	function ideErrorLevelAsDiagnosticSeverity(level: string): DiagnosticSeverity {
+		switch (level) {
+			case "warning": return DiagnosticSeverity.Warning;
+			case "error": return DiagnosticSeverity.Error;
+			case "info": return DiagnosticSeverity.Information;
+			default: return DiagnosticSeverity.Error;
 		}
-		if (!response || !(Array.isArray(response))) {
-			connection.sendAlert({ message: "Got invalid response to ide diagnostics request: " + JSON.stringify(response), uri: textDocument.uri });
-			return;
-		}
-		const diagnostics: Diagnostic[] = [];
-		response.forEach((err) => {
-			let diag: Diagnostic | undefined = undefined;
-			let shouldAlertErrorInDifferentFile = false;
-			err.ranges.forEach((rng) => {
-				if (!diag) {
-					// First range for this error, construct the diagnostic message.
-					let mainRange;
-					const relatedInfo = [];
-					if (rng.fname != "<input>") {
-						// This is a diagnostic raised on another file
-						shouldAlertErrorInDifferentFile = err.level == "error";
-						const defaultRange: FStarRange = {
-							fname: "<input>",
-							beg: [1, 0],
-							end: [1, 0]
-						};
-						mainRange = defaultRange;
-						const relationLocation = {
-							uri: qualifyFilename(rng.fname, textDocument.uri, server),
-							range: fstarRangeAsRange(rng)
-						};
-						const ri: DiagnosticRelatedInformation = {
-							location: relationLocation,
-							message: "related location"
-						};
-						relatedInfo.push(ri);
-					}
-					else {
-						mainRange = rng;
-					}
-					diag = {
-						severity: ideErrorLevelAsDiagnosticSeverity(err.level),
-						range: fstarRangeAsRange(mainRange),
-						message: err.message,
-						relatedInformation: relatedInfo
+	}
+	if (!response || !(Array.isArray(response))) {
+		server.connection.sendAlert({ message: "Got invalid response to ide diagnostics request: " + JSON.stringify(response), uri: textDocument.uri });
+		return;
+	}
+	const diagnostics: Diagnostic[] = [];
+	response.forEach((err) => {
+		let diag: Diagnostic | undefined = undefined;
+		let shouldAlertErrorInDifferentFile = false;
+		err.ranges.forEach((rng) => {
+			if (!diag) {
+				// First range for this error, construct the diagnostic message.
+				let mainRange;
+				const relatedInfo = [];
+				if (rng.fname != "<input>") {
+					// This is a diagnostic raised on another file
+					shouldAlertErrorInDifferentFile = err.level == "error";
+					const defaultRange: FStarRange = {
+						fname: "<input>",
+						beg: [1, 0],
+						end: [1, 0]
 					};
-				} else if (diag) {
-					const relatedLocation = {
+					mainRange = defaultRange;
+					const relationLocation = {
 						uri: qualifyFilename(rng.fname, textDocument.uri, server),
 						range: fstarRangeAsRange(rng)
 					};
-					const relatedInfo: DiagnosticRelatedInformation = {
-						location: relatedLocation,
+					const ri: DiagnosticRelatedInformation = {
+						location: relationLocation,
 						message: "related location"
 					};
-					if (diag.relatedInformation) {
-						diag.relatedInformation.push(relatedInfo);
-					}
+					relatedInfo.push(ri);
 				}
-			});
-			if (shouldAlertErrorInDifferentFile) {
-				connection.sendAlert({ message: err.message, uri: textDocument.uri });
-			}
-			if (diag) {
-				diagnostics.push(diag);
+				else {
+					mainRange = rng;
+				}
+				diag = {
+					severity: ideErrorLevelAsDiagnosticSeverity(err.level),
+					range: fstarRangeAsRange(mainRange),
+					message: err.message,
+					relatedInformation: relatedInfo
+				};
+			} else if (diag) {
+				const relatedLocation = {
+					uri: qualifyFilename(rng.fname, textDocument.uri, server),
+					range: fstarRangeAsRange(rng)
+				};
+				const relatedInfo: DiagnosticRelatedInformation = {
+					location: relatedLocation,
+					message: "related location"
+				};
+				if (diag.relatedInformation) {
+					diag.relatedInformation.push(relatedInfo);
+				}
 			}
 		});
-		const docState = server.getDocumentState(textDocument.uri);
-		if (!docState) { return; }
-		if (lax) {
-			docState.fstar_lax_diagnostics = docState.fstar_lax_diagnostics.concat(diagnostics);
+		if (shouldAlertErrorInDifferentFile) {
+			server.connection.sendAlert({ message: err.message, uri: textDocument.uri });
 		}
-		else {
-			docState.fstar_diagnostics = docState.fstar_diagnostics.concat(diagnostics);
+		if (diag) {
+			diagnostics.push(diag);
 		}
-	};
+	});
+	const docState = server.getDocumentState(textDocument.uri);
+	if (!docState) { return; }
+	if (lax) {
+		docState.fstar_lax_diagnostics = docState.fstar_lax_diagnostics.concat(diagnostics);
+	}
+	else {
+		docState.fstar_diagnostics = docState.fstar_diagnostics.concat(diagnostics);
+	}
 }
 
-function handleIdeAutoCompleteFactory(server: Server): ((textDocument: TextDocument, response: IdeAutoCompleteResponses) => void) {
-	return function (textDocument: TextDocument, response: IdeAutoCompleteResponses) {
-		if (!response || !(Array.isArray(response))) { return; }
-		const doc_state = server.getDocumentState(textDocument.uri);
-		if (!doc_state) { return; }
-		let searchTerm = undefined;
-		response.forEach((resp) => {
-			const annot = resp[1];
-			if (annot == "<search term>") {
-				searchTerm = resp[2];
-			}
-		});
-		if (!searchTerm) { return; }
-		doc_state.auto_complete_info.set(searchTerm, response);
-		return;
-	};
+function handleIdeAutoComplete(textDocument: TextDocument, response: IdeAutoCompleteResponses, server: Server) {
+	if (!response || !(Array.isArray(response))) { return; }
+	const doc_state = server.getDocumentState(textDocument.uri);
+	if (!doc_state) { return; }
+	let searchTerm = undefined;
+	response.forEach((resp) => {
+		const annot = resp[1];
+		if (annot == "<search term>") {
+			searchTerm = resp[2];
+		}
+	});
+	if (!searchTerm) { return; }
+	doc_state.auto_complete_info.set(searchTerm, response);
+	return;
 }
