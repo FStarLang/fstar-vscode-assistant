@@ -138,9 +138,9 @@ export class Server {
 		// method within a closure, or explicitly bind it here. See
 		// https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/thiscallbacks
 		// for the official documentation on this behavior, and
-		// https://javascript.info/bind for a better explanation.
-		this.connection.conn.onInitialize(this.onInitialize.bind(this));
-		this.connection.conn.onInitialized(this.onInitializedHandler.bind(this));
+		// https://javascript.info/bind for another explanation.
+		this.connection.conn.onInitialize(params => this.onInitialize(params));
+		this.connection.conn.onInitialized(() => this.onInitializedHandler());
 		// We don't do anything special when the configuration changes
 		this.connection.conn.onDidChangeConfiguration(_change => {
 			this.updateConfigurationSettings();
@@ -149,7 +149,7 @@ export class Server {
 			// Monitored files have change in VSCode
 			// connection.console.log('We received an file change event');
 		});
-		this.connection.conn.onCompletion(this.onCompletion.bind(this));
+		this.connection.conn.onCompletion(textDocumentPosition => this.onCompletion(textDocumentPosition));
 		// This handler resolves additional information for the item selected in
 		// the completion list.
 		this.connection.conn.onCompletionResolve(
@@ -157,17 +157,17 @@ export class Server {
 				return item;
 			}
 		);
-		this.connection.conn.onHover(this.onHover.bind(this));
-		this.connection.conn.onDefinition(this.onDefinition.bind(this));
-		this.connection.conn.onDocumentRangeFormatting(this.onDocumentRangeFormatting.bind(this));
+		this.connection.conn.onHover(textDocumentPosition => this.onHover(textDocumentPosition));
+		this.connection.conn.onDefinition(defParams => this.onDefinition(defParams));
+		this.connection.conn.onDocumentRangeFormatting(formatParams => this.onDocumentRangeFormatting(formatParams));
 
 		// Custom events
-		this.connection.conn.onRequest("fstar-vscode-assistant/verify-to-position", this.onVerifyToPositionRequest.bind(this));
-		this.connection.conn.onRequest("fstar-vscode-assistant/lax-to-position", this.onLaxToPositionRequest.bind(this));
-		this.connection.conn.onRequest("fstar-vscode-assistant/restart", this.onRestartRequest.bind(this));
-		this.connection.conn.onRequest("fstar-vscode-assistant/text-doc-changed", this.onTextDocChangedRequest.bind(this));
-		this.connection.conn.onRequest("fstar-vscode-assistant/kill-and-restart-solver", this.onKillAndRestartSolverRequest.bind(this));
-		this.connection.conn.onRequest("fstar-vscode-assistant/kill-all", this.onKillAllRequest.bind(this));
+		this.connection.conn.onRequest("fstar-vscode-assistant/verify-to-position", params => this.onVerifyToPositionRequest(params));
+		this.connection.conn.onRequest("fstar-vscode-assistant/lax-to-position", params => this.onLaxToPositionRequest(params));
+		this.connection.conn.onRequest("fstar-vscode-assistant/restart", uri => this.onRestartRequest(uri));
+		this.connection.conn.onRequest("fstar-vscode-assistant/text-doc-changed", params => this.onTextDocChangedRequest(params));
+		this.connection.conn.onRequest("fstar-vscode-assistant/kill-and-restart-solver", uri => this.onKillAndRestartSolverRequest(uri));
+		this.connection.conn.onRequest("fstar-vscode-assistant/kill-all", params => this.onKillAllRequest(params));
 	}
 
 	run() {
