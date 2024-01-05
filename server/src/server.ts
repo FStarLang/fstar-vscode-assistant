@@ -471,11 +471,6 @@ export class Server {
 		});
 
 		// Set the event handlers for the fstar processes
-
-		// Note(klinvill): Since javascript passes objects by reference, changes to
-		// the configuration settings should be visible inside the generated
-		// handler. This preserves the semantics of closing over a global
-		// configurationSettings variable.
 		const handleFStarResponseForDocument = handleFStarResponseForDocumentFactory();
 
 		fstar.proc.stdin?.setDefaultEncoding('utf-8');
