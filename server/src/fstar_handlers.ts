@@ -70,10 +70,14 @@ export function handleFStarResponseForDocumentFactory(): ((textDocument: TextDoc
 		const valid_lines: string[] = [];
 		for (const line of lines) {
 			if (is_valid_fstar_message(line)) {
-				// We assume that fragmented messages will always be delivered
-				// sequentially. Because of this, receiving a non-fragmented
-				// message while the buffer is non-empty results in the buffer
-				// being discarded (since we assume that some error occured).
+				// We assume that fragmented messages will always be read
+				// sequentially. This is a reasonable assumption to make since
+				// messages should be delivered over a local IO stream (which is
+				// FIFO and provides reliable delivery) from a single-threaded
+				// F* IDE process. Because of this assumption, receiving a
+				// non-fragmented message while the buffer is non-empty implies
+				// that some error occured before the process could finish
+				// sending a message, so the buffer is discarded.
 				if (buffer !== "") {
 					console.error("Partially buffered message discarded: " + buffer);
 				}
