@@ -36,8 +36,8 @@ export function qualifyFilename(fname: string, textdocUri: string, server: Serve
 	if (fname != "<input>") {
 		// if we have a relative path, then qualify it to the base of the
 		// F* process's cwd
-		if (!path.isAbsolute(fname) && doc_state && doc_state.fstar.config.cwd) {
-			const base = doc_state.fstar.config.cwd;
+		if (!path.isAbsolute(fname) && doc_state && doc_state.fstar_connection.fstar.config.cwd) {
+			const base = doc_state.fstar_connection.fstar.config.cwd;
 			//concate the base and the relative path
 			return pathToFileURL(path.join(base, fname)).toString();
 		}

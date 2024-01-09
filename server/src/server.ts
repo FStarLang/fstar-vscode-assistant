@@ -33,7 +33,8 @@ import { defaultSettings, fstarVSCodeAssistantSettings } from './settings';
 import { formatIdeProofState, formatIdeSymbol, fstarRangeAsRange, mkPosition, qualifyFilename, rangeAsFStarRange } from './utils';
 import { AlertMessage, ClientConnection } from './client_connection';
 import { FStar } from './fstar';
-import { handleFStarResponseForDocumentFactory } from './fstar_handlers';
+import { FStarConnection } from './fstar_connection';
+import { handleFStarMessageForDocument } from './fstar_handlers';
 
 // LSP Server
 //
@@ -99,7 +100,7 @@ export class Server {
 
 		// Only keep settings for open documents
 		this.documents.onDidClose(e => {
-			this.killFStarProcessesForDocument(e.document);
+			this.closeFStarProcessesForDocument(e.document);
 			// Clear all diagnostics for a document when it is closed
 			this.connection.sendDiagnostics({
 				uri: e.document.uri,
@@ -238,59 +239,46 @@ export class Server {
 		}
 	}
 
-	// Some utilities to send messages to fstar_ide or fstar_lax_ide
-	// Sending a request to either fstar_ide or fstar_lax_ide
-	// Wraps the request with a fresh query-id
-	sendRequestForDocument(textDocument: TextDocument, msg: any, lax?: 'lax') {
+	// Some utilities to send requests to and handle errors from fstar_ide or
+	// fstar_lax_ide.
+	handleFStarError(uri: string, doc_state: DocumentState, err: FStarError | Error, lax?: 'lax') {
+		// F* process exited with some error code
+		if (err instanceof FStarError) {
+			// Only alert once per process
+			if (lax) {
+				if (doc_state.alerted_fstar_lax_process_exited) { return; }
+				doc_state.alerted_fstar_lax_process_exited = true;
+			}
+			else {
+				if (doc_state.alerted_fstar_process_exited) { return; }
+				doc_state.alerted_fstar_process_exited = true;
+			}
+			const msg: AlertMessage = {
+				uri: uri,
+				message: err.message
+			};
+			console.error(msg);
+			this.connection.sendAlert(msg);
+		}
+		// Catch-all for other errors
+		else if (err instanceof Error) {
+			console.error(err);
+			this.connection.sendAlert({ uri: uri, message: err.message });
+		}
+	}
+
+	sendFStarRequestForDocument(textDocument: TextDocument, msg: any, lax?: 'lax') {
 		const doc_state = this.getDocumentState(textDocument.uri);
 		if (!doc_state) {
 			return;
 		}
-		const fstar = this.getFStar(textDocument, lax);
-		if (!fstar) {
+		const fstar_conn = this.getFStarConnection(textDocument, lax);
+		if (!fstar_conn) {
 			return;
 		}
-		else {
-			const qid = doc_state.last_query_id;
-			doc_state.last_query_id = qid + 1;
-			msg["query-id"] = '' + (qid + 1);
-			const text = JSON.stringify(msg);
-			if (this.configurationSettings.debug) {
-				console.log(">>> " + text);
-			}
-			if (fstar.proc.exitCode != null) {
-				if (lax) {
-					if (doc_state.alerted_fstar_lax_process_exited) { return; }
-					doc_state.alerted_fstar_lax_process_exited = true;
-					const msg: AlertMessage = {
-						uri: textDocument.uri,
-						message: "ERROR: F* flycheck process exited with code " + fstar.proc.exitCode
-					};
-					this.connection.sendAlert(msg);
-					console.error(msg);
-				}
-				else {
-					if (doc_state.alerted_fstar_process_exited) { return; }
-					doc_state.alerted_fstar_process_exited = true;
-					const msg: AlertMessage = {
-						uri: textDocument.uri,
-						message: "ERROR: F* checker process exited with code " + fstar.proc.exitCode
-					};
-					this.connection.sendAlert(msg);
-					console.error(msg);
-				}
-				return;
-			}
-			else {
-				try {
-					fstar.proc?.stdin?.write(text);
-					fstar.proc?.stdin?.write("\n");
-				} catch (e) {
-					const msg = "ERROR: Error writing to F* process: " + e;
-					console.error(msg);
-					this.connection.sendAlert({ uri: textDocument.uri, message: msg });
-				}
-			}
+		const result = fstar_conn.sendRequest(msg, this.configurationSettings.debug);
+		if (result instanceof Error) {
+			this.handleFStarError(textDocument.uri, doc_state, result, lax);
 		}
 	}
 
@@ -310,29 +298,39 @@ export class Server {
 			const ranges = [Range.create(mkPosition([0, 0]), mkPosition([textDocument.lineCount, 0]))];
 			if (kind == "full") { this.connection.sendStatusStarted({ uri: textDocument.uri, ranges: ranges }); }
 		}
-		const fstar = this.getFStar(textDocument, lax);
-		if (fstar?.supportsFullBuffer) {
-			const push_context: FullBufferQuery = {
-				query: "full-buffer",
-				args: {
-					kind,
-					"with-symbols": withSymbols,
-					code: textDocument.getText(),
-					line: 0,
-					column: 0
-				}
-			};
-			this.sendRequestForDocument(textDocument, push_context, lax);
+		const fstar_conn = this.getFStarConnection(textDocument, lax);
+		const result = fstar_conn?.sendFullBufferRequest(textDocument.getText(), kind, withSymbols, this.configurationSettings.debug);
+		if (result instanceof UnsupportedError) {
+			// Ignore the error if the process doesn't support full-buffer
+			// queries.
+			//
+			// TODO(klinvill): Is this really the desired behavior? Shouldn't we
+			// surface some kind of warning message instead of silently
+			// suppressing full-buffer requests?
+			return;
+		} else if (result instanceof Error) {
+			const doc_state = this.getDocumentState(textDocument.uri);
+			if (!doc_state) {
+				// TODO(klinvill): This preserves the previous behavior of calling `sendFStarRequestForDocument` (which just returns if the document state can't be retrieved), but also suppresses some errors. Is this really the desired behavior?
+				return;
+			}
+			this.handleFStarError(textDocument.uri, doc_state, result, lax);
 		}
 	}
 
 	validateFStarDocumentToPosition(textDocument: TextDocument, kind: 'verify-to-position' | 'lax-to-position', position: { line: number, column: number }) {
+		// TODO(klinvill): should `pendingChangeEvents` also be cleared on `validateFStarDocument`?
 		this.pendingChangeEvents = []; // Clear pending change events, since we're checking it now
 		// console.log("ValidateFStarDocumentToPosition( " + textDocument.uri + ", " + kind);
 		this.connection.sendClearDiagnostics({ uri: textDocument.uri });
 		// If this is non-lax requests, send a status clear messages to VSCode
-		// to clear the gutter icons and error squiggles
-		// They will be reported again if the document is not verified
+		// to clear the gutter icons and error squiggles They will be reported
+		// again if the document is not verified
+		//
+		// TODO(klinvill): in `validateFStarDocument` this is done only for
+		// non-lax requests. Should a similar check be done here? The previous
+		// implementation of `validateFStarDocumentToPosition` implies that this
+		// function will never be called for lax requests. Is that true?
 		const doc_state = this.getDocumentState(textDocument.uri);
 		if (doc_state) {
 			doc_state.prefix_stale = false;
@@ -340,20 +338,24 @@ export class Server {
 		this.connection.sendStatusClear({ uri: textDocument.uri });
 		const ranges = [Range.create(mkPosition([0, 0]), mkPosition([position.line, 0]))];
 		this.connection.sendStatusStarted({ uri: textDocument.uri, ranges: ranges });
-		const fstar = this.getFStar(textDocument);
-		if (fstar && fstar.supportsFullBuffer) {
-			const push_context: FullBufferQuery = {
-				query: "full-buffer",
-				args: {
-					kind: kind,
-					"with-symbols": false,
-					code: textDocument.getText(),
-					line: 0,
-					column: 0,
-					"to-position": position
-				}
-			};
-			this.sendRequestForDocument(textDocument, push_context);
+
+		const fstar_conn = this.getFStarConnection(textDocument);
+		const result = fstar_conn?.sendPartialBufferRequest(textDocument.getText(), kind, position, this.configurationSettings.debug);
+		if (result instanceof UnsupportedError) {
+			// Ignore the error if the process doesn't support full-buffer
+			// queries.
+			//
+			// TODO(klinvill): Is this really the desired behavior? Shouldn't we
+			// surface some kind of warning message instead of silently
+			// suppressing full-buffer requests?
+			return;
+		} else if (result instanceof Error) {
+			const doc_state = this.getDocumentState(textDocument.uri);
+			if (!doc_state) {
+				// TODO(klinvill): This preserves the previous behavior of calling `sendFStarRequestForDocument` (which just returns if the document state can't be retrieved), but also suppresses some errors. Is this really the desired behavior?
+				return;
+			}
+			this.handleFStarError(textDocument.uri, doc_state, result);
 		}
 	}
 
@@ -362,21 +364,16 @@ export class Server {
 	requestSymbolInfo(textDocument: TextDocument, position: Position, wordAndRange: WordAndRange): void {
 		const uri = textDocument.uri;
 		const filePath = URI.parse(uri).fsPath;
-		const query: LookupQuery = {
-			query: "lookup",
-			args: {
-				context: "code",
-				symbol: wordAndRange.word,
-				"requested-info": ["type", "documentation", "defined-at"],
-				location: {
-					filename: filePath,
-					line: position.line + 1,
-					column: position.character
-				},
-				"symbol-range": wordAndRange.range
+		const fstar_conn = this.getFStarConnection(textDocument, this.configurationSettings.flyCheck ? 'lax' : undefined);
+		const result = fstar_conn?.sendLookupQuery(filePath, position, wordAndRange.word, wordAndRange.range, this.configurationSettings.debug);
+		if (result instanceof Error) {
+			const doc_state = this.getDocumentState(textDocument.uri);
+			if (!doc_state) {
+				// TODO(klinvill): This preserves the previous behavior of calling `sendFStarRequestForDocument` (which just returns if the document state can't be retrieved), but also suppresses some errors. Is this really the desired behavior?
+				return;
 			}
-		};
-		this.sendRequestForDocument(textDocument, query, this.configurationSettings.flyCheck ? 'lax' : undefined);
+			this.handleFStarError(textDocument.uri, doc_state, result);
+		}
 	}
 
 
@@ -400,22 +397,22 @@ export class Server {
 		};
 	}
 
-	killFStarProcessesForDocument(textDocument: TextDocument) {
+	closeFStarProcessesForDocument(textDocument: TextDocument) {
 		const docState = this.getDocumentState(textDocument.uri);
 		if (!docState) return;
-		docState.fstar.proc.kill();
-		docState.fstar_lax.proc.kill();
+		docState.fstar_connection.close();
+		docState.fstar_lax_connection.close();
 		this.documentStates.delete(textDocument.uri);
 	}
 
-	// Get the FStar instance for the given document
-	getFStar(textDocument: TextDocument, lax?: 'lax'): FStar | undefined {
+	// Get the F* connection for the given document
+	getFStarConnection(textDocument: TextDocument, lax?: 'lax'): FStarConnection | undefined {
 		const uri = textDocument.uri;
 		const doc_state = this.getDocumentState(uri);
 		if (lax) {
-			return doc_state?.fstar_lax;
+			return doc_state?.fstar_lax_connection;
 		} else {
-			return doc_state?.fstar;
+			return doc_state?.fstar_connection;
 		}
 	}
 
@@ -446,21 +443,28 @@ export class Server {
 	}
 
 	async refreshDocumentState(textDocument: TextDocument) {
-		const fstar = FStar.fromInferredConfig(textDocument, this.workspaceFolders, this.connection, this.configurationSettings);
-		// Failed to start F*
-		if (!fstar) { return; }
+		const fstar_config = FStar.getFStarConfig(textDocument, this.workspaceFolders, this.connection, this.configurationSettings);
 
-		// We can just re-use the configuration used for the non-lax F* instance.
-		const fstar_lax = FStar.trySpawnFstar(fstar.config, textDocument, this.configurationSettings, this.connection, 'lax');
+		const fstar_conn = FStarConnection.tryCreateFStarConnection(fstar_config, URI.parse(textDocument.uri), this.configurationSettings.debug);
+		// Failed to start F*
+		if (fstar_conn instanceof Error) {
+			this.connection.sendAlert({message: fstar_conn.message, uri: textDocument.uri});
+			return;
+		}
+
+		const fstar_lax_conn = FStarConnection.tryCreateFStarConnection(fstar_config, URI.parse(textDocument.uri), this.configurationSettings.debug, 'lax');
 		// Failed to start F* lax
-		if (!fstar_lax) { return; }
+		if (fstar_lax_conn instanceof Error) {
+			this.connection.sendAlert({message: fstar_lax_conn.message, uri: textDocument.uri});
+			return;
+		}
 
 		// Initialize the document state for this doc
 		this.documentStates.set(textDocument.uri, {
-			fstar: fstar,
+			fstar_connection: fstar_conn.value,
 			alerted_fstar_process_exited: false,
 			fstar_diagnostics: [],
-			fstar_lax: fstar_lax,
+			fstar_lax_connection: fstar_lax_conn.value,
 			alerted_fstar_lax_process_exited: false,
 			fstar_lax_diagnostics: [],
 			last_query_id: 0,
@@ -470,21 +474,34 @@ export class Server {
 			prefix_stale: false,
 		});
 
-		// Set the event handlers for the fstar processes
-		const handleFStarResponseForDocument = handleFStarResponseForDocumentFactory();
-
-		fstar.proc.stdin?.setDefaultEncoding('utf-8');
-		fstar.proc.stdout?.on('data', (data) => { handleFStarResponseForDocument(textDocument, data, false, this); });
-		fstar.proc.stderr?.on('data', (data) => { console.error("fstar stderr: " + data); });
-		fstar_lax.proc.stdin?.setDefaultEncoding('utf-8');
-		fstar_lax.proc.stdout?.on('data', (data) => { handleFStarResponseForDocument(textDocument, data, true, this); });
-		fstar_lax.proc.stderr?.on('data', (data) => { console.error("fstar lax stderr: " + data); });
+		// Set the event handlers for the fstar processes.
+		//
+		// We use the higher-level message handler exposed by `FStarConnection`
+		// for the stdout streams. This handler takes care of buffering messages
+		// and will invoke the handler once for each received valid F* message.
+		fstar_conn.value.on('stdout', 'message', (message) => { handleFStarMessageForDocument(textDocument, message, false, this); });
+		fstar_conn.value.on('stderr','data', (data) => { console.error("fstar stderr: " + data); });
+		fstar_lax_conn.value.on('stdout', 'message', (message) => { handleFStarMessageForDocument(textDocument, message, true, this); });
+		fstar_lax_conn.value.on('stderr','data', (data) => { console.error("fstar lax stderr: " + data); });
 
 		// Send the initial dummy vfs-add request to the fstar processes
-		const filePath = URI.parse(textDocument.uri);
-		const vfs_add: VfsAdd = { "query": "vfs-add", "args": { "filename": filePath.fsPath, "contents": textDocument.getText() } };
-		this.sendRequestForDocument(textDocument, vfs_add);
-		this.sendRequestForDocument(textDocument, vfs_add, 'lax');
+		const filePath = URI.parse(textDocument.uri).fsPath;
+		const contents = textDocument.getText();
+		const doc_state = this.getDocumentState(textDocument.uri);
+		// We should never fail to retrieve the document state since it was just set
+		if (!doc_state) {
+			console.error("Unable to retrieve document state after just setting it. This should never happen. Occured for document: " + textDocument.uri);
+			return;
+		}
+
+		const result = fstar_conn.value.sendVfsAddRequest(filePath, contents, this.configurationSettings.debug);
+		if (result instanceof Error) {
+			this.handleFStarError(textDocument.uri, doc_state, result);
+		}
+		const lax_result = fstar_lax_conn.value.sendVfsAddRequest(filePath, contents, this.configurationSettings.debug);
+		if (lax_result instanceof Error) {
+			this.handleFStarError(textDocument.uri, doc_state, lax_result, 'lax');
+		}
 	}
 
 	// Initialization of the LSP server: Called once when the workspace is opened
@@ -588,14 +605,16 @@ export class Server {
 			const wordAndRange = autoCompleteResponses.wordAndRange;
 			// Don't send requests for very short words
 			if (wordAndRange.word.length < 2) return [];
-			const autoCompletionRequest: AutocompleteRequest = {
-				"query": "autocomplete",
-				"args": {
-					"partial-symbol": wordAndRange.word,
-					"context": "code"
+			const lax = this.configurationSettings.flyCheck ? "lax" : undefined;
+			const fstar_conn = this.getFStarConnection(doc, lax);
+
+			const doc_state = this.getDocumentState(doc.uri);
+			if (doc_state) {
+				const result = fstar_conn?.sendAutocompleteRequest(wordAndRange.word, this.configurationSettings.debug);
+				if (result instanceof Error) {
+					this.handleFStarError(doc.uri, doc_state, result, lax);
 				}
-			};
-			this.sendRequestForDocument(doc, autoCompletionRequest, this.configurationSettings.flyCheck ? "lax" : undefined);
+			}
 		}
 		const items: CompletionItem[] = [];
 		bestMatch.value.forEach((response) => {
@@ -740,7 +759,7 @@ export class Server {
 
 	private async onRestartHandler(textDocument?: TextDocument) {
 		if (!textDocument) { return; }
-		this.killFStarProcessesForDocument(textDocument);
+		this.closeFStarProcessesForDocument(textDocument);
 		await this.refreshDocumentState(textDocument);
 		this.connection.sendStatusClear({ uri: textDocument.uri });
 		// And ask the lax fstar process to verify it
@@ -754,14 +773,18 @@ export class Server {
 		const range: { line: number; character: number }[] = params[1];
 		const textDocument = this.getDocument(uri);
 		if (!textDocument) { return; }
-		const cancelRequest: CancelRequest = {
-			query: "cancel",
-			args: {
-				"cancel-line": range[0].line + 1,
-				"cancel-column": range[0].character
+		// TODO(klinvill): It looks like this function can only be called for
+		// non-lax checking. Is that correct?
+		const fstar_conn = this.getFStarConnection(textDocument);
+		const result = fstar_conn?.sendCancelRequest(range[0], this.configurationSettings.debug);
+		if (result instanceof Error) {
+			const doc_state = this.getDocumentState(textDocument.uri);
+			if (!doc_state) {
+				// TODO(klinvill): This preserves the previous behavior of calling `sendFStarRequestForDocument` (which just returns if the document state can't be retrieved), but also suppresses some errors. Is this really the desired behavior?
+				return;
 			}
-		};
-		this.sendRequestForDocument(textDocument, cancelRequest);
+			this.handleFStarError(textDocument.uri, doc_state, result);
+		}
 	}
 
 	private onKillAndRestartSolverRequest(uri: any) {
@@ -769,13 +792,16 @@ export class Server {
 		if (!textDocument) { return; }
 		const documentState = this.getDocumentState(textDocument.uri);
 		if (!documentState) { return; }
-		const fstar = documentState.fstar;
+		const fstar_conn = documentState.fstar_connection;
 
-		fstar.killZ3SubProcess(this.configurationSettings);
+		fstar_conn.fstar.killZ3SubProcess(this.configurationSettings);
 
 		// Wait for a second for processes to die before restarting the solver
 		setTimeout(() => {
-			this.sendRequestForDocument(textDocument, { query: "restart-solver", args: {} });
+			const result = fstar_conn.sendRestartSolverRequest(this.configurationSettings.debug);
+			if (result instanceof Error) {
+				this.handleFStarError(textDocument.uri, documentState, result);
+			}
 		}, 1000);
 	}
 
@@ -783,7 +809,7 @@ export class Server {
 		this.documentStates.forEach((docState, uri) => {
 			const textDoc = this.getDocument(uri);
 			if (!textDoc) { return; }
-			this.killFStarProcessesForDocument(textDoc);
+			this.closeFStarProcessesForDocument(textDoc);
 		});
 		return;
 	}
@@ -796,12 +822,12 @@ export class Server {
 
 interface DocumentState {
 	// The main fstar.exe process for verifying the current document
-	fstar: FStar;
+	fstar_connection: FStarConnection;
 	alerted_fstar_process_exited: boolean;
 	fstar_diagnostics: Diagnostic[];
 
 	// The fstar.exe process for quickly handling on-change events, symbol lookup etc
-	fstar_lax: FStar;
+	fstar_lax_connection: FStarConnection;
 	alerted_fstar_lax_process_exited: boolean;
 	fstar_lax_diagnostics: Diagnostic[];
 

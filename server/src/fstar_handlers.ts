@@ -11,9 +11,8 @@ import {
 
 import * as crypto from 'crypto';
 
-import { fstarVSCodeAssistantSettings } from './settings';
 import { Server } from './server';
-import { ClientConnection, StatusOkMessage, ok_kind } from './client_connection';
+import { StatusOkMessage, ok_kind } from './client_connection';
 import { mkPosition, fstarRangeAsRange, qualifyFilename } from './utils';
 
 // Cyclic dependency to support mocking out functions within this module when
@@ -25,92 +24,20 @@ import * as fstar_handlers from './fstar_handlers';
 // Handling responses from the F* IDE protocol
 ///////////////////////////////////////////////////////////////////////////////////
 
-// All messages from F* are expected to be valid JSON objects.
-//
-// TODO(klinvill): this should likely be refactored into `fstar_messages.ts` and
-// should check the structure of a message, not just that it's valid JSON. A
-// better method could return either the appropriate message object, or an error
-// otherwise, so that the parsing could be moved out of these handlers and into
-// the same file as the message definitions.
-function is_valid_fstar_message(entry: string): boolean {
-	try {
-		JSON.parse(entry);
-		return true;
-	}
-	catch (err) {
-		return false;
-	}
-}
-
-// Event handler for stdout on fstar_ide. Created as a closure to keep the
-// buffer scoped only to this function. The factory function exists to make
-// unit-testing easier (creating a new function is like resetting the closure
-// state).
-//
 // The server parameter is passed freshly with every request to avoid potential
 // rebinding errors in the future. Furthermore, server is passed instead of
 // configurationSettings (which is also stored on the server instance) to avoid
 // accidentally closing over stale configurationSettings arguments when this
 // function is called (since they can be rebound within the server).
-export function handleFStarResponseForDocumentFactory(): ((textDocument: TextDocument, data: string, lax: boolean, server: Server) => void) {
-	// TODO(klinvill): fragmentation code should probably be refactored into a
-	// separate method, or removed as per Gabriel's suggestion (if another
-	// solution can be found).
-	//
-	// Stateful buffer to store partial messages. Messages appear to be
-	// fragmented into 8192 byte chunks if they exceed this size.
-	let buffer = "";
+export function handleFStarMessageForDocument(textDocument: TextDocument, message: string, lax: boolean, server: Server) {
+	if (server.configurationSettings.debug) {
+		console.log("<<< " + (lax ? "lax" : "") + "uri:<" + textDocument.uri + ">:" + message);
+	}
 
-	return function (textDocument: TextDocument, data: string, lax: boolean, server: Server) {
-		if (server.configurationSettings.debug) {
-			console.log("<<< " + (lax ? "lax" : "") + "uri:<" + textDocument.uri + ">:" + data);
-		}
-		const lines = data.toString().split('\n');
-
-		const valid_lines: string[] = [];
-		for (const line of lines) {
-			if (is_valid_fstar_message(line)) {
-				// We assume that fragmented messages will always be read
-				// sequentially. This is a reasonable assumption to make since
-				// messages should be delivered over a local IO stream (which is
-				// FIFO and provides reliable delivery) from a single-threaded
-				// F* IDE process. Because of this assumption, receiving a
-				// non-fragmented message while the buffer is non-empty implies
-				// that some error occured before the process could finish
-				// sending a message, so the buffer is discarded.
-				if (buffer !== "") {
-					console.error("Partially buffered message discarded: " + buffer);
-				}
-				buffer = "";
-				valid_lines.push(line);
-			} else {
-				// We assume that invalid messages are just message fragments.
-				// We therefore add this fragment to the buffer until the full
-				// message is received.
-				buffer += line;
-				// The message fragment we received may be the last fragment
-				// needed to complete a message. We therefore check here to see
-				// if the buffer constitutes a valid message.
-				if (is_valid_fstar_message(buffer)) {
-					valid_lines.push(buffer);
-					buffer = "";
-				}
-			}
-		}
-
-		// Cyclic dependency on handleOneResponseForDocument to support mocking
-		// out the function when testing. Suggested as a solution in this post:
-		// https://stackoverflow.com/questions/51269431/jest-mock-inner-function
-		valid_lines.forEach(line => { fstar_handlers.handleOneResponseForDocument(textDocument, line, lax, server); });
-	};
-}
-
-// Main event dispatch for F* IDE responses.
-export function handleOneResponseForDocument(textDocument: TextDocument, data: string, lax: boolean, server: Server) {
-	if (data == "") { return; }
+	if (message == "") { return; }
 	let r: IdeResponse;
 	try {
-		r = JSON.parse(data);
+		r = JSON.parse(message);
 	}
 	catch (err) {
 		console.error("Error parsing response: " + err);
@@ -174,10 +101,10 @@ function handleIdeProtocolInfo(textDocument: TextDocument, pi: ProtocolInfo, ser
 		// Both fstar and fstar_lax have their own supportsFullBuffer flag, we
 		// set both of them here assuming that they both have the same support
 		// for full-buffer queries.
-		const fstar = server.getFStar(textDocument);
-		const fstar_lax = server.getFStar(textDocument, 'lax');
-		if (fstar) { fstar.supportsFullBuffer = false; }
-		if (fstar_lax) { fstar_lax.supportsFullBuffer = false; }
+		const fstar_conn = server.getFStarConnection(textDocument);
+		const fstar_lax_conn = server.getFStarConnection(textDocument, 'lax');
+		if (fstar_conn) { fstar_conn.fstar.supportsFullBuffer = false; }
+		if (fstar_lax_conn) { fstar_lax_conn.fstar.supportsFullBuffer = false; }
 		console.error("fstar.exe does not support full-buffer queries.");
 	}
 }
