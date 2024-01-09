@@ -34,7 +34,9 @@ import { formatIdeProofState, formatIdeSymbol, fstarRangeAsRange, mkPosition, qu
 import { AlertMessage, ClientConnection } from './client_connection';
 import { FStar } from './fstar';
 import { FStarConnection } from './fstar_connection';
-import { handleFStarMessageForDocument } from './fstar_handlers';
+import { registerFStarHandlers } from './fstar_handlers';
+import { FStarRange, IdeAutoCompleteResponses, IdeProofState, IdeSymbol } from './fstar_messages';
+import { FStarError, UnsupportedError } from './errors';
 
 // LSP Server
 //
@@ -475,14 +477,8 @@ export class Server {
 		});
 
 		// Set the event handlers for the fstar processes.
-		//
-		// We use the higher-level message handler exposed by `FStarConnection`
-		// for the stdout streams. This handler takes care of buffering messages
-		// and will invoke the handler once for each received valid F* message.
-		fstar_conn.value.on('stdout', 'message', (message) => { handleFStarMessageForDocument(textDocument, message, false, this); });
-		fstar_conn.value.on('stderr','data', (data) => { console.error("fstar stderr: " + data); });
-		fstar_lax_conn.value.on('stdout', 'message', (message) => { handleFStarMessageForDocument(textDocument, message, true, this); });
-		fstar_lax_conn.value.on('stderr','data', (data) => { console.error("fstar lax stderr: " + data); });
+		registerFStarHandlers(fstar_conn.value, textDocument, false, this);
+		registerFStarHandlers(fstar_lax_conn.value, textDocument, true, this);
 
 		// Send the initial dummy vfs-add request to the fstar processes
 		const filePath = URI.parse(textDocument.uri).fsPath;

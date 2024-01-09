@@ -1,12 +1,26 @@
+import { Ok, Result } from './result';
+
+
 ////////////////////////////////////////////////////////////////////////////////////
 // Response messages in the IDE protocol that fstar.exe uses
 ////////////////////////////////////////////////////////////////////////////////////
 
 // ProtocolInfo: The first response from fstar.exe when it is first launched
-interface ProtocolInfo {
+export interface ProtocolInfo {
 	kind: 'protocol-info';
 	version: number;
 	features: string[];
+}
+
+export function isProtocolInfo(object: any): boolean {
+	return object
+		&& object.kind && object.kind === 'protocol-info'
+		&& object.version
+		&& object.features;
+}
+
+export function parseProtocolInfo(object: any): ProtocolInfo | undefined {
+	if (isProtocolInfo(object)) return object;
 }
 
 // An FStarRange is a range of positions in some source file
@@ -14,15 +28,26 @@ interface ProtocolInfo {
 // A quirk is that the line number is 1-based, but the column number is 0-based
 // In contrast, the LSP protocol uses 0-based line and column numbers
 // So, we need to convert between the two
-interface FStarRange {
+export interface FStarRange {
 	fname: string;
 	beg: number[];
 	end: number[]
 }
 
+export function isFStarRange(object: any): boolean {
+	return object
+		&& object.fname
+		&& object.beg
+		&& object.end;
+}
+
+export function parseFStarRange(object: any): FStarRange | undefined {
+	if (isFStarRange(object)) return object;
+}
+
 // IdeSymbol: This message is sent from fstar.exe in response to a
 // request for a onHover or onDefnition symbol lookup
-interface IdeSymbol {
+export interface IdeSymbol {
 	kind: 'symbol';
 	name: string;
 	type: string;
@@ -33,12 +58,28 @@ interface IdeSymbol {
 	symbol: string;
 }
 
+export function isIdeSymbol(object: any): boolean {
+	return object
+		&& object.kind && object.kind === 'symbol'
+		&& object.name
+		&& object.type
+		&& object.documentation
+		&& object.definition
+		&& object["defined-at"] && isFStarRange(object["defined-at"])
+		&& object["symbol-range"] && isFStarRange(object["symbol-range"])
+		&& object.symbol;
+}
+
+export function parseIdeSymbol(object: any): IdeSymbol | undefined {
+	if (isIdeSymbol(object)) return object;
+}
+
 // IdeProofState: fstar.exe sends informative messages when running tactics
 // The server does not explicitly request the proof state---these messages
 // are just sent by fstar.exe as a side-effect of running tactics
 // The server stores the proof state in a table, and uses it to display
 // the proof state in the onHover message
-interface IdeProofState {
+export interface IdeProofState {
 	label: string; // User-provided label, e.g., dump "A"
 	depth: number; // The depth of this dump message (not displayed)
 	urgency: number; // Urgency (not displayed)
@@ -47,8 +88,25 @@ interface IdeProofState {
 	location: FStarRange; // The location of the tactic that triggered a proof state dump
 }
 
+export function isIdeProofState(object: any): boolean {
+	return object
+		&& object.label
+		&& object.depth
+		&& object.urgency
+		// TODO(klinvill): How rigorous should these checks be? There's a
+		// tradeoff between extra safety and speed/complexity. I'm omitting deep
+		// inspection for now.
+		&& object.goals
+		&& object["smt-goals"]
+		&& object.location && isFStarRange(object.location);
+}
+
+export function parseIdeProofState(object: any): IdeProofState | undefined {
+	if (isIdeProofState(object)) return object;
+}
+
 // A Contextual goal is a goal with all the hypothesis in context
-interface IdeProofStateContextualGoal {
+export interface IdeProofStateContextualGoal {
 	hyps: {
 		name: string;
 		type: string;
@@ -56,27 +114,70 @@ interface IdeProofStateContextualGoal {
 	goal: IdeProofStateGoal;
 }
 
+export function isIdeProofStateContextualGoal(object: any): boolean {
+	return object
+		&& object.hyps
+		&& object.goal && isIdeProofStateGoal(object.goal);
+}
+
+export function parseIdeProofStateContextualGoal(object: any): IdeProofStateContextualGoal | undefined {
+	if (isIdeProofStateContextualGoal(object)) return object;
+}
+
 // A goal itself is a witness and a type, with a label
-interface IdeProofStateGoal {
+export interface IdeProofStateGoal {
 	witness: string;
 	type: string;
 	label: string;
 }
 
+export function isIdeProofStateGoal(object: any): boolean {
+	return object
+		&& object.witness
+		&& object.type
+		&& object.label;
+}
+
+export function parseIdeProofStateGoal(object: any): IdeProofStateGoal | undefined {
+	if (isIdeProofStateGoal(object)) return object;
+}
+
 // IDEError: fstar.exe sends this message when reporting errors and warnings
-interface IdeError {
+export interface IdeError {
 	message: string;
 	number: number;
 	level: 'warning' | 'error' | 'info';
 	ranges: FStarRange[];
 }
 
-interface IdeCodeFragment {
+export function isIdeError(object: any): boolean {
+	return object
+		&& object.message
+		&& object.number
+		&& object.level
+		&& object.ranges;
+}
+
+export function parseIdeError(object: any): IdeError | undefined {
+	if (isIdeError(object)) return object;
+}
+
+export interface IdeCodeFragment {
 	"code-digest": string;
 	range: FStarRange;
 }
 
-interface IdeProgress {
+export function isIdeCodeFragment(object: any): boolean {
+	return object
+		&& object["code-digest"]
+		&& object.range && isFStarRange(object.range);
+}
+
+export function parseIdeCodeFragment(object: any): IdeCodeFragment | undefined {
+	if (isIdeCodeFragment(object)) return object;
+}
+
+export interface IdeProgress {
 	stage: 'full-buffer-started'
 	| 'full-buffer-fragment-started'
 	| 'full-buffer-fragment-ok'
@@ -87,14 +188,48 @@ interface IdeProgress {
 	"code-fragment"?: IdeCodeFragment
 }
 
+export function isIdeProgress(object: any): boolean {
+	return object
+		&& object.stage
+		&& object.ranges && isFStarRange(object.ranges);
+}
+
+export function parseIdeProgress(object: any): IdeProgress | undefined {
+	if (isIdeProgress(object)) return object;
+}
 
 // An auto-complete response
-type IdeAutoCompleteResponse = [number, string, string];
-type IdeAutoCompleteResponses = IdeAutoCompleteResponse[];
-type IdeQueryResponseTypes = IdeSymbol | IdeError | IdeError[] | IdeAutoCompleteResponses;
+export type IdeAutoCompleteResponse = [number, string, string];
+export type IdeAutoCompleteResponses = IdeAutoCompleteResponse[];
+export type IdeQueryResponseTypes = IdeSymbol | IdeError | IdeError[] | IdeAutoCompleteResponses;
+
+export function isIdeAutoCompleteResponse(object: any): boolean {
+	return object && object instanceof Array && object.length == 3;
+}
+
+export function parseIdeAutoCompleteResponse(object: any): IdeAutoCompleteResponse | undefined {
+	if (isIdeAutoCompleteResponse(object)) return object;
+}
+
+export function isIdeQueryResponseTypes(object: any): boolean {
+	return object && (
+		isIdeSymbol(object)
+		|| isIdeError(object)
+		|| object instanceof Array && (
+			// IdeError array
+			object.length == 0 || isIdeError(object[0])
+			// IdeAutoCompleteResponse array
+			|| isIdeAutoCompleteResponse(object[0])
+		)
+	);
+}
+
+export function parseIdeQueryResponseTypes(object: any): IdeQueryResponseTypes | undefined {
+	if (isIdeQueryResponseTypes(object)) return object;
+}
 
 // A query response envelope
-interface IdeQueryResponse {
+export interface IdeQueryResponse {
 	'query-id': string;
 	kind: 'protocol-info' | 'response' | 'message';
 	status?: 'success' | 'failure';
@@ -103,8 +238,36 @@ interface IdeQueryResponse {
 	contents?: IdeProofState | IdeSymbol | IdeProgress;
 }
 
-type IdeResponse = IdeQueryResponse | ProtocolInfo
+export function isIdeQueryResponse(object: any): boolean {
+	return object
+		&& object['query-id']
+		&& object.kind;
+}
 
+export function parseIdeQueryResponse(object: any): IdeQueryResponse | undefined {
+	if (isIdeQueryResponse(object)) return object;
+}
+
+export type IdeResponse = IdeQueryResponse | ProtocolInfo
+
+export function isIdeResponse(object: any): boolean {
+	return isIdeQueryResponse(object) || isProtocolInfo(object);
+}
+
+export function parseIdeResponse(message: string): Result<IdeResponse, Error> {
+	try {
+		const r = JSON.parse(message);
+
+		if (isIdeResponse(r)) return new Ok(r);
+		else return new Error("Response does not match any known IdeResponse type: " + message);
+	}
+	catch (err) {
+		if (err instanceof Error)
+			return err;
+		else
+			return new Error("Error parsing response: " + err);
+	}
+}
 
 ////////////////////////////////////////////////////////////////////////////////////
 // Request messages in the IDE protocol that fstar.exe uses
@@ -113,7 +276,7 @@ type IdeResponse = IdeQueryResponse | ProtocolInfo
 // The first request from LSP to fstar.exe is a vfs-add, just to record that a file
 // has been opened. The filename is usually null. It's not clear that this message
 // is actually required, however, fstar-mode.el sends it, so we do too.
-interface VfsAdd {
+export interface VfsAdd {
 	query: 'vfs-add';
 	args: {
 		filename: string | null;
@@ -140,7 +303,7 @@ interface VfsAdd {
 //
 // It's the job of fstar.exe to deal with incrementality. It does that by maintaining its
 // own internal state and only checking the part of the buffer that has changed.
-interface FullBufferQuery {
+export interface FullBufferQuery {
 	query: 'full-buffer';
 	args: {
 		kind: 'full' | 'lax' | 'cache' | 'reload-deps' | 'verify-to-position' | 'lax-to-position';
@@ -156,7 +319,7 @@ interface FullBufferQuery {
 }
 
 // A LookupQuery is sent to fstar_lax_ide to get symbol information for onHover and onDefinition
-interface LookupQuery {
+export interface LookupQuery {
 	query: 'lookup';
 	args: {
 		context: 'code';
@@ -178,7 +341,7 @@ interface LookupQuery {
 
 // A Cancel message is sent to fstar_ide when to document changes at a given range, to stop it
 // from verifying the part of the buffer that has changed
-interface CancelRequest {
+export interface CancelRequest {
 	query: 'cancel';
 	args: {
 		"cancel-line": number;
@@ -187,7 +350,7 @@ interface CancelRequest {
 }
 
 // A request for autocompletion
-interface AutocompleteRequest {
+export interface AutocompleteRequest {
 	query: 'autocomplete';
 	args: {
 		"partial-symbol": string;

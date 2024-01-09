@@ -14,85 +14,43 @@ import * as crypto from 'crypto';
 import { Server } from './server';
 import { StatusOkMessage, ok_kind } from './client_connection';
 import { mkPosition, fstarRangeAsRange, qualifyFilename } from './utils';
+import { FStarRange, IdeAutoCompleteResponses, IdeError, IdeProgress, IdeProofState, IdeSymbol, ProtocolInfo } from './fstar_messages';
+import { FStarConnection } from './fstar_connection';
 
-// Cyclic dependency to support mocking out functions within this module when
-// testing other functions within the module. Suggested as a solution in this
-// post: https://stackoverflow.com/questions/51269431/jest-mock-inner-function
-import * as fstar_handlers from './fstar_handlers';
 
 ///////////////////////////////////////////////////////////////////////////////////
 // Handling responses from the F* IDE protocol
 ///////////////////////////////////////////////////////////////////////////////////
 
+// We use the higher-level message handler exposed by `FStarConnection` for the
+// stdout streams. This handler takes care of buffering messages and will invoke
+// the handler once for each received valid F* message.
+//
 // The server parameter is passed freshly with every request to avoid potential
 // rebinding errors in the future. Furthermore, server is passed instead of
 // configurationSettings (which is also stored on the server instance) to avoid
 // accidentally closing over stale configurationSettings arguments when this
 // function is called (since they can be rebound within the server).
-export function handleFStarMessageForDocument(textDocument: TextDocument, message: string, lax: boolean, server: Server) {
+export function registerFStarHandlers(fstar_conn: FStarConnection, textDocument: TextDocument, lax: boolean, server: Server) {
+	const stdout_stream = 'stdout';
 	if (server.configurationSettings.debug) {
-		console.log("<<< " + (lax ? "lax" : "") + "uri:<" + textDocument.uri + ">:" + message);
+		fstar_conn.on(stdout_stream, 'message', (message) => {
+			console.log("<<< " + (lax ? "lax" : "") + "uri:<" + textDocument.uri + ">:" + message);
+		});
 	}
 
-	if (message == "") { return; }
-	let r: IdeResponse;
-	try {
-		r = JSON.parse(message);
-	}
-	catch (err) {
-		console.error("Error parsing response: " + err);
-		return;
-	}
-	if (r.kind == "protocol-info") {
-		return handleIdeProtocolInfo(textDocument, r as ProtocolInfo, server);
-	}
-	else if (r.kind == "message" && r.level == "progress") {
-		return handleIdeProgress(textDocument, r.contents as IdeProgress, lax, server);
-	}
-	else if (r.kind == "message" && r.level == "proof-state") {
-		if (!r.contents) { return; }
-		return handleIdeProofState(textDocument, r.contents as IdeProofState, server);
-	}
-	else if (r.kind == "response") {
-		if (!r.response) {
-			if (server.configurationSettings.debug) {
-				console.log("Unexpected response: " + JSON.stringify(r));
-			}
-			return;
-		}
-		switch (decideIdeReponseType(r.response)) {
-			case 'symbol':
-				return handleIdeSymbol(textDocument, r.response as IdeSymbol, server);
+	fstar_conn.on(stdout_stream, 'message:protocol-info', r => handleIdeProtocolInfo(textDocument, r, server));
+	fstar_conn.on(stdout_stream, 'message:ide-progress', r => handleIdeProgress(textDocument, r, lax, server));
+	fstar_conn.on(stdout_stream, 'message:ide-proof-state', r => handleIdeProofState(textDocument, r, server));
+	fstar_conn.on(stdout_stream, 'message:ide-symbol', r => handleIdeSymbol(textDocument, r, server));
+	fstar_conn.on(stdout_stream, 'message:ide-error', r => handleIdeDiagnostics(textDocument, r, lax, server));
+	fstar_conn.on(stdout_stream, 'message:ide-auto-complete', r => handleIdeAutoComplete(textDocument, r, server));
 
-			case 'error':
-				return handleIdeDiagnostics(textDocument, r.response as IdeError[], lax, server);
+	fstar_conn.on(stdout_stream, 'message:ide-info', r => console.log("Info: " + r));
 
-			case 'auto-complete':
-				return handleIdeAutoComplete(textDocument, r.response as IdeAutoCompleteResponses, server);
-		}
-	}
-	else if (r.kind == "message" && r.level == "info") {
-		console.log("Info: " + r.contents);
-	}
-	else {
-		if (server.configurationSettings.debug) {
-			console.log("Unhandled response: " + r.kind);
-		}
-	}
-}
-
-function decideIdeReponseType(response: IdeQueryResponseTypes): 'symbol' | 'error' | 'auto-complete' {
-	if (Array.isArray(response)) {
-		if (response.length > 0 && Array.isArray(response[0])) {
-			return "auto-complete";
-		}
-		else {
-			return "error";
-		}
-	}
-	else {
-		return "symbol";
-	}
+	// The stderr handlers just log every bit of received data
+	const proc_name = lax ? "fstar lax" : "fstar";
+	fstar_conn.on('stderr','data', (data) => { console.error(proc_name + " stderr: " + data); });
 }
 
 // If the F* does not support full-buffer queries, we log it and set a flag

@@ -6,8 +6,12 @@ import {
 	URI
 } from 'vscode-uri';
 
+import { Readable } from 'node:stream';
+
 import { FStar, FStarConfig } from './fstar';
+import { AutocompleteRequest, CancelRequest, FStarRange, FullBufferQuery, IdeAutoCompleteResponses, IdeError, IdeProgress, IdeProofState, IdeQueryResponse, IdeQueryResponseTypes, IdeSymbol, LookupQuery, ProtocolInfo, VfsAdd, isIdeQueryResponse, isProtocolInfo } from './fstar_messages';
 import { Ok, Result } from './result';
+import { FStarError, UnsupportedError } from './errors';
 
 
 export class FStarConnection {
@@ -20,6 +24,9 @@ export class FStarConnection {
 		this.last_query_id = 0;
 		this.fstar = fstar;
 		this.fstar.proc.stdin?.setDefaultEncoding('utf-8');
+
+		// Add custom events that can be listened for
+		this.addCustomEvents();
 	}
 
 	// Attempts to spawn an F* process, using the given configuration and filePath, and create a connection to it.
@@ -38,9 +45,33 @@ export class FStarConnection {
 		this.fstar.proc.kill();
 	}
 
-	// Register an event handler on the F* process. Supports the special event
-	// 'message' which triggers on each valid F* message, as well as any event
-	// supported by a NodeJS `Stream`.
+	// Register an event handler on the F* process. Supports the events
+	// supported by a NodeJS `Stream`, along with the following special events
+	// on the 'stdout' stream:
+	//
+	// - 'message': emitted for each valid F* message, emits the message which
+	//   is a valid javascript object.
+	//
+	// - 'message:protocol-info': emitted for each protocol-info message, emits
+	//   the contents as a `ProtocolInfo` object.
+	//
+	// - 'message:ide-progress': emitted for each progress message, emits the
+	//   contents as an `IdeProgress` object.
+	//
+	// - 'message:ide-proof-state': emitted for each proof-state message, emits
+	//   the contents as an `IdeProofState` object.
+	//
+	// - 'message:ide-info': emitted for each info message, emits the contents
+	//   as-is.
+	//
+	// - 'message:ide-symbol': emitted for each symbol message, emits the
+	//   response as an `IdeSymbol` object.
+	//
+	// - 'message:ide-error': emitted for each error message, emits the response
+	//   as an `IdeError[]` object.
+	//
+	// - 'message:ide-auto-complete': emitted for each auto-complete message,
+	//   emits the response as an `IdeAutoCompleteResponses` object.
 	on(stream: 'stdout' | 'stderr' | 'stdin', event: string, handler: (...args:any[]) => void) {
 		let fstar_stream;
 		if (stream === 'stdout') {
@@ -50,18 +81,94 @@ export class FStarConnection {
 		} else if (stream === 'stdin') {
 			fstar_stream = this.fstar.proc.stdin;
 		}
+		if (fstar_stream)
+			fstar_stream.on(event, handler);
+		else
+			console.warn("Could not retrieve the" + stream + "stream for this F* proccess");
+	}
 
-		// Add a higher-level message handler that will invoke the handler on
-		// each valid F* message. The message handler incorporates buffering to
-		// handle fragmented messages.
-		if (event === 'message') {
-			const messageHandler = FStarConnection.bufferedMessageHandlerFactory(handler);
-			fstar_stream?.on('data', messageHandler);
-		} else {
-			// Otherwise passes the event handler through to the stream
-			fstar_stream?.on(event, handler);
+	// Custom events that will be emitted on top of 'data' events. These events
+	// can be listened for.
+	private addCustomEvents() {
+		const stdout_stream = this.fstar.proc.stdout;
+		if (!stdout_stream) {
+			console.warn("Could not retrieve the stdout stream to register custom event handlers");
+			return;
 		}
+		const handler = (msg: object) => this.emitPerMessage(stdout_stream, msg);
+		// The bufferHandler buffers up received input until it finds a valid
+		// message. The wrapped handler will then be called with the parsed
+		// valid message. This handles receiving fragmented messages or multiple
+		// messages over the stream from the F* process.
+		const bufferHandler = FStarConnection.bufferedMessageHandlerFactory(handler);
+		// Note: listeners stack rather than overwrite each other so other
+		// 'data' handlers won't overwrite our custom events handler.
+		stdout_stream.on('data', bufferHandler);
+	}
 
+	// Emits the appropriate events for a given message. This helper adds the
+	// following events:
+	// - 'message': emitted for each valid F* message, emits the message which
+	//   is a valid javascript object.
+	// - 'message:protocol-info': emitted for each protocol-info message, emits
+	//   the contents as a `ProtocolInfo` object.
+	// - 'message:ide-progress': emitted for each progress message, emits the
+	//   contents as an `IdeProgress` object.
+	// - 'message:ide-proof-state': emitted for each proof-state message, emits
+	//   the contents as an `IdeProofState` object.
+	// - 'message:ide-info': emitted for each info message, emits the contents
+	//   as-is.
+	// - 'message:ide-symbol': emitted for each symbol message, emits the
+	//   response as an `IdeSymbol` object.
+	// - 'message:ide-error': emitted for each error message, emits the response
+	//   as an `IdeError[]` object.
+	// - 'message:ide-auto-complete': emitted for each auto-complete message,
+	//   emits the response as an `IdeAutoCompleteResponses` object.
+	private emitPerMessage(stream: Readable, msg: object) {
+		stream.emit('message', msg);
+
+		// Events for specific message types
+		if (isProtocolInfo(msg)) {
+			stream.emit('message:protocol-info', msg as ProtocolInfo);
+		} else if (isIdeQueryResponse(msg)) {
+			const r = msg as IdeQueryResponse;
+			if (r.kind === 'message' && r.level === 'progress') {
+				stream.emit('message:ide-progress', r.contents as IdeProgress);
+			} else if (r.kind === 'message' && r.level === 'proof-state') {
+				stream.emit('message:ide-proof-state', r.contents as IdeProofState);
+			} else if (r.kind === 'message' && r.level === 'info') {
+				stream.emit('message:ide-info', r.contents);
+			} else if (r.kind === "response" && r.response) {
+				const responseType = this.decideIdeReponseType(r.response);
+				if (responseType === 'symbol') {
+					stream.emit('message:ide-symbol', r.response as IdeSymbol);
+				} else if (responseType === 'error') {
+					stream.emit('message:ide-error', r.response as IdeError[]);
+				} else if (responseType === 'auto-complete') {
+					stream.emit('message:ide-auto-complete', r.response as IdeAutoCompleteResponses);
+				} else {
+					console.warn("No additional events emitted for unrecognized message: " + JSON.stringify(msg));
+				}
+			} else {
+				console.warn("No additional events emitted for unrecognized message: " + JSON.stringify(msg));
+			}
+		} else {
+			console.warn("No additional events emitted for unrecognized message: " + JSON.stringify(msg));
+		}
+	}
+
+	private decideIdeReponseType(response: IdeQueryResponseTypes): 'symbol' | 'error' | 'auto-complete' {
+		if (Array.isArray(response)) {
+			if (response.length > 0 && Array.isArray(response[0])) {
+				return "auto-complete";
+			}
+			else {
+				return "error";
+			}
+		}
+		else {
+			return "symbol";
+		}
 	}
 
 	// All messages from F* are expected to be valid JSON objects.
@@ -89,7 +196,7 @@ export class FStarConnection {
 	// Note that this function is created as a closure to keep the buffer scoped
 	// only to this function. The factory function exists to make unit-testing
 	// easier (creating a new function is like resetting the closure state).
-	static bufferedMessageHandlerFactory(handler: (message: string) => void) {
+	static bufferedMessageHandlerFactory(handler: (message: object) => void) {
 		// TODO(klinvill): Gabriel suggests removing fragmentation (if another
 		// solution can be found).
 		//
@@ -100,7 +207,7 @@ export class FStarConnection {
 		return function (data: string) {
 			const lines = data.toString().split('\n');
 
-			const valid_lines: string[] = [];
+			const valid_messages: object[] = [];
 			for (const line of lines) {
 				if (FStarConnection.is_valid_fstar_message(line)) {
 					// We assume that fragmented messages will always be read
@@ -115,7 +222,8 @@ export class FStarConnection {
 						console.error("Partially buffered message discarded: " + buffer);
 					}
 					buffer = "";
-					valid_lines.push(line);
+					// Valid messages are valid JSON objects
+					valid_messages.push(JSON.parse(line));
 				} else {
 					// We assume that invalid messages are just message fragments.
 					// We therefore add this fragment to the buffer until the full
@@ -125,14 +233,15 @@ export class FStarConnection {
 					// needed to complete a message. We therefore check here to see
 					// if the buffer constitutes a valid message.
 					if (FStarConnection.is_valid_fstar_message(buffer)) {
-						valid_lines.push(buffer);
+						// Valid messages are valid JSON objects
+						valid_messages.push(JSON.parse(buffer));
 						buffer = "";
 					}
 				}
 			}
 
-			// Invoke the message handler for each received message in-order.
-			valid_lines.forEach(message => handler(message));
+			// Invoke the message handler for each received message in-order
+			valid_messages.forEach(message => handler(message));
 		};
 	}
 

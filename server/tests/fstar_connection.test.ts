@@ -21,7 +21,7 @@ describe('bufferedMessageHandler tests', () => {
 		bufferedMessageHandler(valid_message);
 		// Valid messages are passed on for further handling
 		expect(mockHandler).toHaveBeenCalledTimes(1);
-		expect(mockHandler).toHaveBeenLastCalledWith(valid_message);
+		expect(mockHandler).toHaveBeenLastCalledWith(JSON.parse(valid_message));
 	});
 
 	test('test fragmented message', () => {
@@ -37,7 +37,7 @@ describe('bufferedMessageHandler tests', () => {
 		expect(mockHandler).toHaveBeenCalledTimes(0);
 		bufferedMessageHandler(fragment_2);
 		expect(mockHandler).toHaveBeenCalledTimes(1);
-		expect(mockHandler).toHaveBeenLastCalledWith(fragment_0 + fragment_1 + fragment_2);
+		expect(mockHandler).toHaveBeenLastCalledWith(JSON.parse(fragment_0 + fragment_1 + fragment_2));
 	});
 
 	test('test out-of-order fragmented messages are not handled', () => {
@@ -66,14 +66,14 @@ describe('bufferedMessageHandler tests', () => {
 		// messages, so a valid message results in the buffer being flushed.
 		bufferedMessageHandler(valid_message);
 		expect(mockHandler).toHaveBeenCalledTimes(1);
-		expect(mockHandler).toHaveBeenLastCalledWith(valid_message);
+		expect(mockHandler).toHaveBeenLastCalledWith(JSON.parse(valid_message));
 
 		bufferedMessageHandler(fragment_0);
 		expect(mockHandler).toHaveBeenCalledTimes(1);
 
 		bufferedMessageHandler(valid_message);
 		expect(mockHandler).toHaveBeenCalledTimes(2);
-		expect(mockHandler).toHaveBeenLastCalledWith(valid_message);
+		expect(mockHandler).toHaveBeenLastCalledWith(JSON.parse(valid_message));
 
 		bufferedMessageHandler(fragment_1);
 		expect(mockHandler).toHaveBeenCalledTimes(2);
@@ -94,7 +94,7 @@ describe('bufferedMessageHandler tests', () => {
 		// if they were received as separate messages.
 		bufferedMessageHandler(combined_messages);
 		expect(mockHandler).toHaveBeenCalledTimes(2);
-		expect(mockHandler).toHaveBeenNthCalledWith(1, valid_message);
-		expect(mockHandler).toHaveBeenNthCalledWith(2, fragment_0 + fragment_1 + fragment_2);
+		expect(mockHandler).toHaveBeenNthCalledWith(1, JSON.parse(valid_message));
+		expect(mockHandler).toHaveBeenNthCalledWith(2, JSON.parse(fragment_0 + fragment_1 + fragment_2));
 	});
 });

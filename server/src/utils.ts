@@ -9,6 +9,7 @@ import { pathToFileURL } from 'url';
 
 import * as fs from 'fs';
 
+import { FStarRange, IdeProofState, IdeProofStateContextualGoal, IdeSymbol } from './fstar_messages';
 import { Server } from './server';
 
 ////////////////////////////////////////////////////////////////////////////////////
