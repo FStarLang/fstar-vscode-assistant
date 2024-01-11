@@ -8,6 +8,7 @@ import path = require('path');
 import { pathToFileURL } from 'url';
 
 import * as fs from 'fs';
+import * as util from 'util';
 
 import { Server } from './server';
 
@@ -55,9 +56,9 @@ export function qualifyFilename(fname: string, textdocUri: string, server: Serve
 
 // Checks if filePath is includes in the cone rooted at dirPath
 // Used to check if a file is in the workspace
-export function checkFileInDirectory(dirPath: string, filePath: string): boolean {
+export async function checkFileInDirectory(dirPath: string, filePath: string): Promise<boolean> {
 	// Check if dirPath is a directory using fs.stat()
-	const stats = fs.statSync(dirPath);
+	const stats = await util.promisify(fs.stat)(dirPath);
 	if (!stats || !stats.isDirectory()) {
 		//console.log(dirPath + ' is not a directory');
 		return false;
@@ -80,24 +81,10 @@ export function checkFileInDirectory(dirPath: string, filePath: string): boolean
 // Finds all files in a folder whose name has `extension` as a suffix
 // Returns an array of absolute paths of the files
 // Used to find all config files in the workspace
-export function findFilesByExtension(folderPath: string, extension: string) {
-	// Read the folder contents using fs.readdir()
-	const matches: string[] = [];
-	const files = fs.readdirSync(folderPath);
-	if (!files) {
-		console.error("No files found in " + folderPath);
-		return [];
-	}
-	// Loop over the files
-	for (const file of files) {
-		// console.log("Checking file " + file + " for extension " + extension);
-		if (file.endsWith(extension)) {
-			// console.log("Found config file " + file);
-			// absolute path of file is folderPath + file
-			matches.push(path.join(folderPath, file));
-		}
-	}
-	return matches;
+export async function findFilesByExtension(folderPath: string, extension: string): Promise<string[]> {
+	return (await util.promisify(fs.readdir)(folderPath))
+		.filter(file => file.endsWith(extension))
+		.map(file => path.join(folderPath, file));
 }
 
 export function getEnclosingDirectories(filePath: string): string[] {

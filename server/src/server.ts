@@ -446,7 +446,7 @@ export class Server {
 	}
 
 	async refreshDocumentState(textDocument: TextDocument) {
-		const fstar = FStar.fromInferredConfig(textDocument, this.workspaceFolders, this.connection, this.configurationSettings);
+		const fstar = await FStar.fromInferredConfig(textDocument, this.workspaceFolders, this.connection, this.configurationSettings);
 		// Failed to start F*
 		if (!fstar) { return; }
 
@@ -677,12 +677,12 @@ export class Server {
 		return [];
 	}
 
-	private onDocumentRangeFormatting(formatParams: DocumentRangeFormattingParams) {
+	private async onDocumentRangeFormatting(formatParams: DocumentRangeFormattingParams) {
 		const textDoc = this.getDocument(formatParams.textDocument.uri);
 		if (!textDoc) { return []; }
 		const text = textDoc.getText(formatParams.range);
 		// call fstar.exe synchronously to format the text
-		const fstarConfig = FStar.getFStarConfig(textDoc, this.workspaceFolders, this.connection, this.configurationSettings);
+		const fstarConfig = await FStar.getFStarConfig(textDoc, this.workspaceFolders, this.connection, this.configurationSettings);
 		const format_query = {
 			"query-id": "1",
 			query: "format",
