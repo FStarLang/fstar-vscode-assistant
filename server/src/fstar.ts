@@ -178,28 +178,65 @@ export class FStar {
 		return undefined;
 	}
 
-	// Either finds and loads the closest .fst.config.json for the given file, or returns a default configuration.
+	static async getConfigFromMakefile(filePath: string): Promise<FStarConfig | undefined> {
+		const cwd = path.dirname(filePath);
+		let out: {stdout: string, stderr: string};
+		try {
+			out = await util.promisify(cp.execFile)('make', [`${path.basename(filePath)}-in`], {cwd});
+		} catch (e) {
+			return;
+		}
+		const cmdlineOpts = out.stdout.trim().split(' ');
+
+		const options: string[] = [];
+		const include_dirs: string[] = [];
+
+		// Separate cmdlineOpts into options and include_dirs
+		let nextIsInclude = false;
+		for (const opt of cmdlineOpts) {
+			if (nextIsInclude) {
+				include_dirs.push(opt);
+				nextIsInclude = false;
+			} else if (opt === '--include') {
+				nextIsInclude = true;
+			} else {
+				options.push(opt);
+			}
+		}
+
+		return { cwd, include_dirs, options };
+	}
+
+	// Loads the F* configuration from the first available source:
+	// 1. An *.fst.config.json file in a parent directory inside the current workspace
+	// 2. The output printed by `make My.File.fst-in`
+	// 3. A default configuration
 	static async getFStarConfig(textDocument: TextDocument, workspaceFolders: WorkspaceFolder[], connection: ClientConnection, configurationSettings: fstarVSCodeAssistantSettings): Promise<FStarConfig> {
 		const filePath = URI.parse(textDocument.uri).fsPath;
-		const defaultConfig: FStarConfig = {
+
+		// 1. Config file
+		const configFilepath = await this.findConfigFile(textDocument, workspaceFolders, configurationSettings);
+		if (configFilepath) {
+			const config = await this.parseConfigFile(textDocument, configFilepath, connection, configurationSettings);
+			if (config) {
+				// If cwd isn't specified, it's assumed to be the directory in which the
+				// config file is located.
+				config.cwd ??= path.dirname(configFilepath);
+				return config;
+			}
+		}
+
+		// 2. Makefile
+		const configFromMakefile = await this.getConfigFromMakefile(filePath);
+		if (configFromMakefile) return configFromMakefile;
+
+		// 3. Default
+		return {
 			options: [],
 			include_dirs: [],
 			fstar_exe: "fstar.exe",
 			cwd: path.dirname(filePath)
 		};
-		const configFilepath = await this.findConfigFile(textDocument, workspaceFolders, configurationSettings);
-
-		let config;
-		if (configFilepath) {
-			config = await this.parseConfigFile(textDocument, configFilepath, connection, configurationSettings);
-
-			// If cwd isn't specified, it's assumed to be the directory in which the
-			// config file is located.
-			if (config && !config.cwd) {
-				config.cwd = path.dirname(configFilepath);
-			}
-		}
-		return config || defaultConfig;
 	}
 }
 
