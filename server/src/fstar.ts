@@ -15,6 +15,7 @@ import * as pstree from 'ps-tree';
 import * as which from 'which';
 import * as fs from 'fs';
 import path = require('path');
+import * as util from 'util';
 
 import { fstarVSCodeAssistantSettings } from './settings';
 import { ClientConnection } from './client_connection';
@@ -88,8 +89,9 @@ export class FStar {
 
 	// Dynamically loads the FStarConfiguration for a given file `textDocument`
 	// before attempting to launch an instance of F*.
-	static fromInferredConfig(textDocument: TextDocument, workspaceFolders: WorkspaceFolder[], connection: ClientConnection, configurationSettings: fstarVSCodeAssistantSettings, lax?: 'lax'): FStar | undefined {
-		const config = this.getFStarConfig(textDocument, workspaceFolders, connection, configurationSettings);
+	static async fromInferredConfig(textDocument: TextDocument, workspaceFolders: WorkspaceFolder[], connection: ClientConnection,
+			configurationSettings: fstarVSCodeAssistantSettings, lax?: 'lax'): Promise<FStar | undefined> {
+		const config = await this.getFStarConfig(textDocument, workspaceFolders, connection, configurationSettings);
 		return this.trySpawnFstar(config, textDocument, configurationSettings, connection, lax);
 	}
 
@@ -107,8 +109,8 @@ export class FStar {
 		});
 	}
 
-	static parseConfigFile(textDocument: TextDocument, configFile: string, connection: ClientConnection, configurationSettings: fstarVSCodeAssistantSettings): FStarConfig {
-		const contents = fs.readFileSync(configFile, 'utf8');
+	static async parseConfigFile(textDocument: TextDocument, configFile: string, connection: ClientConnection, configurationSettings: fstarVSCodeAssistantSettings): Promise<FStarConfig> {
+		const contents = await util.promisify(fs.readFile)(configFile, 'utf8');
 		function substituteEnvVars(value: string) {
 			return value.replace(/\$([A-Z_]+[A-Z0-9_]*)|\${([A-Z0-9_]*)}/ig,
 				(_, a, b) => {
@@ -151,20 +153,21 @@ export class FStar {
 	// Finds the .fst.config.json for a given file
 	// by searching from that file's directory up to the workspace root
 	// for a .fst.config.json file, taking the one nearest to the file
-	static findConfigFile(e: TextDocument, workspaceFolders: WorkspaceFolder[], configurationSettings: fstarVSCodeAssistantSettings): string | undefined {
+	static async findConfigFile(e: TextDocument, workspaceFolders: WorkspaceFolder[], configurationSettings: fstarVSCodeAssistantSettings): Promise<string | undefined> {
 		const filePath = URI.parse(e.uri).fsPath;
 		const allEnclosingDirectories = getEnclosingDirectories(filePath);
 		for (const dir of allEnclosingDirectories) {
 			if (configurationSettings.debug) {
 				console.log("Checking directory " + dir + " for config file");
 			}
-			//if dir not in workspaceFolders, break
-			if (!workspaceFolders.find((folder) => {
-				return checkFileInDirectory(URI.parse(folder.uri).fsPath, dir);
-			})) {
-				break;
+
+			let dirInWorkspaceFolder = false;
+			for (const folder of workspaceFolders) {
+				dirInWorkspaceFolder ||= await checkFileInDirectory(URI.parse(folder.uri).fsPath, dir);
 			}
-			const matches = findFilesByExtension(dir, '.fst.config.json');
+			if (!dirInWorkspaceFolder) break;
+
+			const matches = await findFilesByExtension(dir, '.fst.config.json');
 			if (matches.length > 0) {
 				if (configurationSettings.debug) {
 					console.log("Using config file " + matches[0] + " for " + filePath);
@@ -175,28 +178,65 @@ export class FStar {
 		return undefined;
 	}
 
-	// Either finds and loads the closest .fst.config.json for the given file, or returns a default configuration.
-	static getFStarConfig(textDocument: TextDocument, workspaceFolders: WorkspaceFolder[], connection: ClientConnection, configurationSettings: fstarVSCodeAssistantSettings): FStarConfig {
+	static async getConfigFromMakefile(filePath: string): Promise<FStarConfig | undefined> {
+		const cwd = path.dirname(filePath);
+		let out: {stdout: string, stderr: string};
+		try {
+			out = await util.promisify(cp.execFile)('make', [`${path.basename(filePath)}-in`], {cwd});
+		} catch (e) {
+			return;
+		}
+		const cmdlineOpts = out.stdout.trim().split(' ');
+
+		const options: string[] = [];
+		const include_dirs: string[] = [];
+
+		// Separate cmdlineOpts into options and include_dirs
+		let nextIsInclude = false;
+		for (const opt of cmdlineOpts) {
+			if (nextIsInclude) {
+				include_dirs.push(opt);
+				nextIsInclude = false;
+			} else if (opt === '--include') {
+				nextIsInclude = true;
+			} else {
+				options.push(opt);
+			}
+		}
+
+		return { cwd, include_dirs, options };
+	}
+
+	// Loads the F* configuration from the first available source:
+	// 1. An *.fst.config.json file in a parent directory inside the current workspace
+	// 2. The output printed by `make My.File.fst-in`
+	// 3. A default configuration
+	static async getFStarConfig(textDocument: TextDocument, workspaceFolders: WorkspaceFolder[], connection: ClientConnection, configurationSettings: fstarVSCodeAssistantSettings): Promise<FStarConfig> {
 		const filePath = URI.parse(textDocument.uri).fsPath;
-		const defaultConfig: FStarConfig = {
+
+		// 1. Config file
+		const configFilepath = await this.findConfigFile(textDocument, workspaceFolders, configurationSettings);
+		if (configFilepath) {
+			const config = await this.parseConfigFile(textDocument, configFilepath, connection, configurationSettings);
+			if (config) {
+				// If cwd isn't specified, it's assumed to be the directory in which the
+				// config file is located.
+				config.cwd ??= path.dirname(configFilepath);
+				return config;
+			}
+		}
+
+		// 2. Makefile
+		const configFromMakefile = await this.getConfigFromMakefile(filePath);
+		if (configFromMakefile) return configFromMakefile;
+
+		// 3. Default
+		return {
 			options: [],
 			include_dirs: [],
 			fstar_exe: "fstar.exe",
 			cwd: path.dirname(filePath)
 		};
-		const configFilepath = this.findConfigFile(textDocument, workspaceFolders, configurationSettings);
-
-		let config;
-		if (configFilepath) {
-			config = this.parseConfigFile(textDocument, configFilepath, connection, configurationSettings);
-
-			// If cwd isn't specified, it's assumed to be the directory in which the
-			// config file is located.
-			if (config && !config.cwd) {
-				config.cwd = path.dirname(configFilepath);
-			}
-		}
-		return config || defaultConfig;
 	}
 }
 
