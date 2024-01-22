@@ -11,6 +11,7 @@ import * as fs from 'fs';
 import * as util from 'util';
 
 import { Server } from './server';
+import { FStarRange, IdeProofState, IdeProofStateContextualGoal, IdeSymbol } from './fstar_messages';
 
 ////////////////////////////////////////////////////////////////////////////////////
 // Range utilities
@@ -37,8 +38,8 @@ export function qualifyFilename(fname: string, textdocUri: string, server: Serve
 	if (fname != "<input>") {
 		// if we have a relative path, then qualify it to the base of the
 		// F* process's cwd
-		if (!path.isAbsolute(fname) && doc_state && doc_state.fstar.config.cwd) {
-			const base = doc_state.fstar.config.cwd;
+		const base = doc_state?.fstar.fstar_config().cwd;
+		if (!path.isAbsolute(fname) && base) {
 			//concate the base and the relative path
 			return pathToFileURL(path.join(base, fname)).toString();
 		}
@@ -148,5 +149,40 @@ export function formatIdeSymbol(symbol: IdeSymbol): Hover {
 			kind: 'markdown',
 			value: "```fstar\n" + symbol.name + ":\n" + symbol.type + "\n```\n"
 		}
+	};
+}
+
+
+////////////////////////////////////////////////////////////////////////////////////
+// Promise Utilities
+////////////////////////////////////////////////////////////////////////////////////
+
+// Type of a Promise along with its associated resolve and reject functions that
+// can be invoked outside the Promise's constructor.
+//
+// TODO(klinvill): should this type be generic with respect to both T and E? Or
+// just successfully resolved types T?
+export type internalPromise<T, E extends Error> = {promise: Promise<T>, resolve: (v: T) => void, reject: (e: E) => void};
+
+// Custom implementation of Promise.withResolvers() until it's implemented in
+// Node. This function is useful for providing access to the resolve and reject
+// functions for a Promise outside its constructor. For further details see
+// https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/withResolvers
+//
+// TODO(klinvill): should this function be generic with respect to both T and E?
+// Or just successfully resolved types T?
+export function withResolvers<T, E extends Error>(): internalPromise<T, E> {
+	// Default resolvers do nothing, but this satisfies the type checker.
+	let resolver = (v: T) => { return; };
+	let rejecter = (e: E) => { return; };
+
+	const promise = new Promise<T>((resolve, reject) => {
+		resolver = resolve;
+		rejecter = reject;
+	});
+	return {
+		promise,
+		resolve: resolver,
+		reject: rejecter
 	};
 }

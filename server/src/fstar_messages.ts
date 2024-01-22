@@ -3,10 +3,17 @@
 ////////////////////////////////////////////////////////////////////////////////////
 
 // ProtocolInfo: The first response from fstar.exe when it is first launched
-interface ProtocolInfo {
+export interface ProtocolInfo {
 	kind: 'protocol-info';
 	version: number;
 	features: string[];
+}
+
+export function isProtocolInfo(object: any): boolean {
+	// We assume that the server is well-behaved and doesn't send ill-formed
+	// messages
+	return object
+		&& object.kind && object.kind === 'protocol-info';
 }
 
 // An FStarRange is a range of positions in some source file
@@ -14,7 +21,7 @@ interface ProtocolInfo {
 // A quirk is that the line number is 1-based, but the column number is 0-based
 // In contrast, the LSP protocol uses 0-based line and column numbers
 // So, we need to convert between the two
-interface FStarRange {
+export interface FStarRange {
 	fname: string;
 	beg: number[];
 	end: number[]
@@ -22,7 +29,7 @@ interface FStarRange {
 
 // IdeSymbol: This message is sent from fstar.exe in response to a
 // request for a onHover or onDefnition symbol lookup
-interface IdeSymbol {
+export interface IdeSymbol {
 	kind: 'symbol';
 	name: string;
 	type: string;
@@ -38,7 +45,7 @@ interface IdeSymbol {
 // are just sent by fstar.exe as a side-effect of running tactics
 // The server stores the proof state in a table, and uses it to display
 // the proof state in the onHover message
-interface IdeProofState {
+export interface IdeProofState {
 	label: string; // User-provided label, e.g., dump "A"
 	depth: number; // The depth of this dump message (not displayed)
 	urgency: number; // Urgency (not displayed)
@@ -48,7 +55,7 @@ interface IdeProofState {
 }
 
 // A Contextual goal is a goal with all the hypothesis in context
-interface IdeProofStateContextualGoal {
+export interface IdeProofStateContextualGoal {
 	hyps: {
 		name: string;
 		type: string;
@@ -57,26 +64,26 @@ interface IdeProofStateContextualGoal {
 }
 
 // A goal itself is a witness and a type, with a label
-interface IdeProofStateGoal {
+export interface IdeProofStateGoal {
 	witness: string;
 	type: string;
 	label: string;
 }
 
 // IDEError: fstar.exe sends this message when reporting errors and warnings
-interface IdeError {
+export interface IdeError {
 	message: string;
 	number: number;
 	level: 'warning' | 'error' | 'info';
 	ranges: FStarRange[];
 }
 
-interface IdeCodeFragment {
+export interface IdeCodeFragment {
 	"code-digest": string;
 	range: FStarRange;
 }
 
-interface IdeProgress {
+export interface IdeProgress {
 	stage: 'full-buffer-started'
 	| 'full-buffer-fragment-started'
 	| 'full-buffer-fragment-ok'
@@ -89,12 +96,12 @@ interface IdeProgress {
 
 
 // An auto-complete response
-type IdeAutoCompleteResponse = [number, string, string];
-type IdeAutoCompleteResponses = IdeAutoCompleteResponse[];
-type IdeQueryResponseTypes = IdeSymbol | IdeError | IdeError[] | IdeAutoCompleteResponses;
+export type IdeAutoCompleteResponse = [number, string, string];
+export type IdeAutoCompleteResponses = IdeAutoCompleteResponse[];
+export type IdeQueryResponseTypes = IdeSymbol | IdeError | IdeError[] | IdeAutoCompleteResponses;
 
 // A query response envelope
-interface IdeQueryResponse {
+export interface IdeQueryResponse {
 	'query-id': string;
 	kind: 'protocol-info' | 'response' | 'message';
 	status?: 'success' | 'failure';
@@ -103,7 +110,7 @@ interface IdeQueryResponse {
 	contents?: IdeProofState | IdeSymbol | IdeProgress;
 }
 
-type IdeResponse = IdeQueryResponse | ProtocolInfo
+export type IdeResponse = IdeQueryResponse | ProtocolInfo
 
 
 ////////////////////////////////////////////////////////////////////////////////////
@@ -113,7 +120,7 @@ type IdeResponse = IdeQueryResponse | ProtocolInfo
 // The first request from LSP to fstar.exe is a vfs-add, just to record that a file
 // has been opened. The filename is usually null. It's not clear that this message
 // is actually required, however, fstar-mode.el sends it, so we do too.
-interface VfsAdd {
+export interface VfsAdd {
 	query: 'vfs-add';
 	args: {
 		filename: string | null;
@@ -140,7 +147,7 @@ interface VfsAdd {
 //
 // It's the job of fstar.exe to deal with incrementality. It does that by maintaining its
 // own internal state and only checking the part of the buffer that has changed.
-interface FullBufferQuery {
+export interface FullBufferQuery {
 	query: 'full-buffer';
 	args: {
 		kind: 'full' | 'lax' | 'cache' | 'reload-deps' | 'verify-to-position' | 'lax-to-position';
@@ -156,7 +163,7 @@ interface FullBufferQuery {
 }
 
 // A LookupQuery is sent to fstar_lax_ide to get symbol information for onHover and onDefinition
-interface LookupQuery {
+export interface LookupQuery {
 	query: 'lookup';
 	args: {
 		context: 'code';
@@ -176,9 +183,9 @@ interface LookupQuery {
 	}
 }
 
-// A Cancel message is sent to fstar_ide when to document changes at a given range, to stop it
+// A Cancel message is sent to fstar_ide when the document changes at a given range, to stop it
 // from verifying the part of the buffer that has changed
-interface CancelRequest {
+export interface CancelRequest {
 	query: 'cancel';
 	args: {
 		"cancel-line": number;
@@ -187,7 +194,7 @@ interface CancelRequest {
 }
 
 // A request for autocompletion
-interface AutocompleteRequest {
+export interface AutocompleteRequest {
 	query: 'autocomplete';
 	args: {
 		"partial-symbol": string;

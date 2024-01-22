@@ -25,7 +25,7 @@ import { checkFileInDirectory, findFilesByExtension, getEnclosingDirectories } f
 export class FStar {
 	proc: cp.ChildProcess;
 	config: FStarConfig;
-	// TODO(klinvill): @nikswamy, this just indicates whether the F* executable supports sending a full buffer, right?
+	// Indicates whether the F* process supports full-buffer mode
 	supportsFullBuffer: boolean;
 	lax: boolean;
 
@@ -38,12 +38,13 @@ export class FStar {
 
 	// Tries to spawn an fstar.exe process using the given configuration and
 	// `textDocument` file.
-	static trySpawnFstar(config: FStarConfig, textDocument: TextDocument, configurationSettings: fstarVSCodeAssistantSettings, connection: ClientConnection, lax?: 'lax'): FStar | undefined {
+	//
+	// @throws {Error} if fstar.exe cannot be found in the current path
+	static trySpawnFstar(config: FStarConfig, filePath: URI, debug: boolean, lax?: 'lax'): FStar | undefined {
 		// F* is assumed to support full-buffers unless it sends a message indicating otherwise
 		const supportsFullBuffer = true;
 
 		// Construct the options for fstar.exe
-		const filePath = URI.parse(textDocument.uri);
 		const options = ["--ide", filePath.fsPath];
 
 		if (lax) {
@@ -64,7 +65,7 @@ export class FStar {
 		if (!config.cwd) {
 			config.cwd = path.dirname(filePath.fsPath);
 		}
-		if (configurationSettings.debug) {
+		if (debug) {
 			console.log("Spawning fstar with options: " + options);
 		}
 
@@ -74,8 +75,7 @@ export class FStar {
 			const fstar_exe_path = which.sync(config.fstar_exe);
 		}
 		catch (err) {
-			connection.sendAlert({ message: "Failed to find fstar.exe in path: " + err, uri: textDocument.uri });
-			return undefined;
+			throw new Error("Failed to find fstar.exe in path: " + err);
 		}
 
 		const proc = cp.spawn(
@@ -92,16 +92,17 @@ export class FStar {
 	static async fromInferredConfig(textDocument: TextDocument, workspaceFolders: WorkspaceFolder[], connection: ClientConnection,
 			configurationSettings: fstarVSCodeAssistantSettings, lax?: 'lax'): Promise<FStar | undefined> {
 		const config = await this.getFStarConfig(textDocument, workspaceFolders, connection, configurationSettings);
-		return this.trySpawnFstar(config, textDocument, configurationSettings, connection, lax);
+		const filePath = URI.parse(textDocument.uri);
+		return this.trySpawnFstar(config, filePath, configurationSettings.debug, lax);
 	}
 
-	killZ3SubProcess(configurationSettings: fstarVSCodeAssistantSettings) {
+	killZ3SubProcess(debug: boolean) {
 		if (!this.proc || !this.proc.pid) { return; }
 		pstree(this.proc.pid, (err, children) => {
 			if (err) { return; }
 			const z3Processes = children.filter(p => p.COMMAND.startsWith("z3"));
 			z3Processes.forEach(p => {
-				if (configurationSettings.debug) {
+				if (debug) {
 					console.log("Killing z3 process with PID: " + p.PID);
 				}
 				process.kill(parseInt(p.PID));
@@ -241,7 +242,7 @@ export class FStar {
 }
 
 // The type of an .fst.config.json file
-interface FStarConfig {
+export interface FStarConfig {
 	include_dirs?: string[]; // --include paths
 	options?: string[];      // other options to be passed to fstar.exe
 	fstar_exe?: string;       // path to fstar.exe
