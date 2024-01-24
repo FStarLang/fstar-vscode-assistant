@@ -135,12 +135,29 @@ export class FStarConnection {
 		}
 	}
 
-	// Send a request to F* to check the given code.
-	async fullBufferRequest(code: string, kind: 'full' | 'lax' | 'cache' | 'reload-deps', withSymbols: boolean): partialResult<IdeProgress> {
+	// Wrapper for a request that doesn't expect a response.
+	private async silentRequest<T>(query: T) {
+		const expectResponse = false;
+		return this.request(query, expectResponse);
+	}
+
+	// Wrapper for a request that results in a stream of responses.
+	private async streamRequest<T, R>(query: T) : partialResult<R> {
+		const expectResponse = true;
+		const is_stream = true;
+		return this.request(query, expectResponse, is_stream);
+	}
+
+	private async fullBufferQuery(query: FullBufferQuery): partialResult<IdeProgress> {
 		if (!this.fstar.supportsFullBuffer) {
 			throw new Error("ERROR: F* process does not support full-buffer queries");
 		}
-		const query: FullBufferQuery = {
+		return this.streamRequest(query);
+	}
+
+	// Send a request to F* to check the given code.
+	async fullBufferRequest(code: string, kind: 'full' | 'lax' | 'cache' | 'reload-deps', withSymbols: boolean): partialResult<IdeProgress> {
+		return this.fullBufferQuery({
 			query: "full-buffer",
 			args: {
 				kind,
@@ -149,11 +166,7 @@ export class FStarConnection {
 				line: 0,
 				column: 0
 			}
-		};
-
-		const expect_response = true;
-		const is_stream = true;
-		return this.request(query, expect_response, is_stream);
+		});
 	}
 
 	// Send a request to F* to check the given code up through a position.
@@ -162,10 +175,7 @@ export class FStarConnection {
 	// process (lax or not), do we need the `kind` argument here or can we infer
 	// it from the F* process?
 	async partialBufferRequest(code: string, kind: 'verify-to-position' | 'lax-to-position', position: { line: number, column: number }): partialResult<IdeProgress> {
-		if (!this.fstar.supportsFullBuffer) {
-			throw new Error("ERROR: F* process does not support full-buffer queries");
-		}
-		const query: FullBufferQuery = {
+		return this.fullBufferQuery({
 			query: "full-buffer",
 			args: {
 				kind,
@@ -175,11 +185,7 @@ export class FStarConnection {
 				column: 0,
 				"to-position": position
 			}
-		};
-
-		const expect_response = true;
-		const is_stream = true;
-		return this.request(query, expect_response, is_stream);
+		});
 	}
 
 	// Look up information about an identifier in a given file.
@@ -216,9 +222,7 @@ export class FStarConnection {
 				contents: contents
 			}
 		};
-
-		const expect_response = false;
-		this.request(query, expect_response);
+		this.silentRequest(query);
 	}
 
 	// Request to get a list of completions for the given word (commonly a
@@ -255,8 +259,7 @@ export class FStarConnection {
 
 		// TODO(klinvill): I believe there's no responses to cancel requests, is
 		// that correct?
-		const expect_response = false;
-		this.request(query, expect_response);
+		this.silentRequest(query);
 	}
 
 	async restartSolverRequest() {
@@ -264,11 +267,7 @@ export class FStarConnection {
 			query: "restart-solver",
 			args: {}
 		};
-
-		// TODO(klinvill): I believe there's no responses to restart-solver requests, is
-		// that correct?
-		const expect_response = false;
-		this.request(query, expect_response);
+		this.silentRequest(query);
 	}
 
 	////////////////////////////////////////////////////////////////////////////////////
