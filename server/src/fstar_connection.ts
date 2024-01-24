@@ -34,8 +34,11 @@ export class FStarConnection {
 	// response.
 	private pending_responses: Map<number, {resolve: (v: any) => void, reject: (e: any) => void, is_stream: boolean}>;
 	private fstar: FStar;
+	debug: boolean;
 
-	constructor(fstar: FStar) {
+	constructor(fstar: FStar, debug: boolean) {
+		this.debug = debug;
+
 		// F*'s IDE protocol requires that each request have a unique query-id.
 		// We use a monotonic id.
 		this.last_query_id = 0;
@@ -71,7 +74,7 @@ export class FStarConnection {
 	static tryCreateFStarConnection(fstarConfig: FStarConfig, filePath: URI, debug: boolean, lax?: 'lax') : FStarConnection | undefined {
 		const fstar = FStar.trySpawnFstar(fstarConfig, filePath, debug, lax);
 		if (fstar)
-			return new FStarConnection(fstar);
+			return new FStarConnection(fstar, debug);
 		else
 			return undefined;
 	}
@@ -81,12 +84,12 @@ export class FStarConnection {
 		this.fstar.proc.kill();
 	}
 
-	async restartSolver(debug: boolean) {
-		this.fstar.killZ3SubProcess(debug);
+	async restartSolver() {
+		this.fstar.killZ3SubProcess(this.debug);
 
 		// Wait for a second for processes to die before restarting the solver
 		await setTimeout(1000);
-		this.restartSolverRequest(debug);
+		this.restartSolverRequest();
 	}
 
 	// Gets the configuration for the F* process.
@@ -102,13 +105,13 @@ export class FStarConnection {
 	//
 	// @param expect_response indicates if a response from F* is expected for
 	// this request.
-	private async request(msg: any, debug: boolean, expect_response = true, is_stream = false): Promise<any> {
+	private async request(msg: any, expect_response = true, is_stream = false): Promise<any> {
 		// TODO(klinvill): do we need to worry about racing requests here that might result in the same query-id? That would cause issues when tracking responses.
 		const qid = this.last_query_id + 1;
 		this.last_query_id = qid;
 		msg["query-id"] = '' + qid;
 		const text = JSON.stringify(msg);
-		if (debug) {
+		if (this.debug) {
 			console.log(">>> " + text);
 		}
 		if (this.fstar.proc.exitCode != null) {
@@ -133,7 +136,7 @@ export class FStarConnection {
 	}
 
 	// Send a request to F* to check the given code.
-	async fullBufferRequest(code: string, kind: 'full' | 'lax' | 'cache' | 'reload-deps', withSymbols: boolean, debug: boolean): partialResult<IdeProgress> {
+	async fullBufferRequest(code: string, kind: 'full' | 'lax' | 'cache' | 'reload-deps', withSymbols: boolean): partialResult<IdeProgress> {
 		if (!this.fstar.supportsFullBuffer) {
 			throw new Error("ERROR: F* process does not support full-buffer queries");
 		}
@@ -150,7 +153,7 @@ export class FStarConnection {
 
 		const expect_response = true;
 		const is_stream = true;
-		return this.request(query, debug, expect_response, is_stream);
+		return this.request(query, expect_response, is_stream);
 	}
 
 	// Send a request to F* to check the given code up through a position.
@@ -158,7 +161,7 @@ export class FStarConnection {
 	// TODO(klinvill): Since this FStarConnection object is only for one F*
 	// process (lax or not), do we need the `kind` argument here or can we infer
 	// it from the F* process?
-	async partialBufferRequest(code: string, kind: 'verify-to-position' | 'lax-to-position', position: { line: number, column: number }, debug: boolean): partialResult<IdeProgress> {
+	async partialBufferRequest(code: string, kind: 'verify-to-position' | 'lax-to-position', position: { line: number, column: number }): partialResult<IdeProgress> {
 		if (!this.fstar.supportsFullBuffer) {
 			throw new Error("ERROR: F* process does not support full-buffer queries");
 		}
@@ -176,14 +179,14 @@ export class FStarConnection {
 
 		const expect_response = true;
 		const is_stream = true;
-		return this.request(query, debug, expect_response, is_stream);
+		return this.request(query, expect_response, is_stream);
 	}
 
 	// Look up information about an identifier in a given file.
 	//
 	// For more details, see:
 	// https://github.com/FStarLang/FStar/wiki/Editor-support-for-F*#lookup
-	async lookupQuery(filePath: string, position: Position, word: string, range: FStarRange, debug: boolean): Promise<IdeSymbol> {
+	async lookupQuery(filePath: string, position: Position, word: string, range: FStarRange): Promise<IdeSymbol> {
 		const query: LookupQuery = {
 			query: "lookup",
 			args: {
@@ -198,14 +201,14 @@ export class FStarConnection {
 				"symbol-range": range
 			}
 		};
-		return this.request(query, debug);
+		return this.request(query);
 	}
 
 	// Request to map a file into F*'s virtual file system.
 	//
 	// For more details, see:
 	// https://github.com/FStarLang/FStar/wiki/Editor-support-for-F*#vfs-add
-	async vfsAddRequest(filePath: string, contents: string, debug: boolean) {
+	async vfsAddRequest(filePath: string, contents: string) {
 		const query: VfsAdd = {
 			query: "vfs-add",
 			args: {
@@ -215,7 +218,7 @@ export class FStarConnection {
 		};
 
 		const expect_response = false;
-		this.request(query, debug, expect_response);
+		this.request(query, expect_response);
 	}
 
 	// Request to get a list of completions for the given word (commonly a
@@ -223,7 +226,7 @@ export class FStarConnection {
 	//
 	// For more details, see:
 	// https://github.com/FStarLang/FStar/wiki/Editor-support-for-F*#auto-complete
-	async autocompleteRequest(word: string, debug: boolean) : Promise<IdeAutoCompleteResponses> {
+	async autocompleteRequest(word: string) : Promise<IdeAutoCompleteResponses> {
 		const query: AutocompleteRequest = {
 			"query": "autocomplete",
 			"args": {
@@ -231,7 +234,7 @@ export class FStarConnection {
 				"context": "code"
 			}
 		};
-		return this.request(query, debug);
+		return this.request(query);
 	}
 
 	// A Cancel message should be sent to F* when the document changes at a
@@ -241,7 +244,7 @@ export class FStarConnection {
 	// TODO(klinvill): What exactly does this do? I copied the comment with the
 	// messages interface definition. Should also be documented in
 	// https://github.com/FStarLang/FStar/wiki/Editor-support-for-F*#cancel
-	async cancelRequest(range: { line: number; character: number }, debug: boolean) {
+	async cancelRequest(range: { line: number; character: number }) {
 		const query: CancelRequest = {
 			query: "cancel",
 			args: {
@@ -253,10 +256,10 @@ export class FStarConnection {
 		// TODO(klinvill): I believe there's no responses to cancel requests, is
 		// that correct?
 		const expect_response = false;
-		this.request(query, debug, expect_response);
+		this.request(query, expect_response);
 	}
 
-	async restartSolverRequest(debug: boolean) {
+	async restartSolverRequest() {
 		const query = {
 			query: "restart-solver",
 			args: {}
@@ -265,7 +268,7 @@ export class FStarConnection {
 		// TODO(klinvill): I believe there's no responses to restart-solver requests, is
 		// that correct?
 		const expect_response = false;
-		this.request(query, debug, expect_response);
+		this.request(query, expect_response);
 	}
 
 	////////////////////////////////////////////////////////////////////////////////////

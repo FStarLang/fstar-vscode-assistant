@@ -258,7 +258,7 @@ export class Server {
 		}
 		const fstar_conn = this.getFStarConnection(textDocument, lax);
 		if (!fstar_conn) { return; }
-		let [progress, next_promise] = await fstar_conn.fullBufferRequest(textDocument.getText(), kind, withSymbols, this.configurationSettings.debug);
+		let [progress, next_promise] = await fstar_conn.fullBufferRequest(textDocument.getText(), kind, withSymbols);
 
 		// full-buffer queries result in a stream of IdeProgress responses.
 		// These are returned as `partialResult` values which are essentially
@@ -296,7 +296,7 @@ export class Server {
 
 		const fstar_conn = this.getFStarConnection(textDocument, lax);
 		if (!fstar_conn) { return; }
-		let [progress, next_promise] = await fstar_conn.partialBufferRequest(textDocument.getText(), kind, position, this.configurationSettings.debug);
+		let [progress, next_promise] = await fstar_conn.partialBufferRequest(textDocument.getText(), kind, position);
 
 		// full-buffer queries result in a stream of IdeProgress responses.
 		// These are returned as `partialResult` values which are essentially
@@ -317,7 +317,7 @@ export class Server {
 		const lax = this.configurationSettings.flyCheck ? 'lax' : undefined;
 		const fstar_conn = this.getFStarConnection(textDocument, lax);
 		if (!fstar_conn) { return; }
-		const symbol = await fstar_conn.lookupQuery(filePath, position, wordAndRange.word, wordAndRange.range, this.configurationSettings.debug);
+		const symbol = await fstar_conn.lookupQuery(filePath, position, wordAndRange.word, wordAndRange.range);
 		handleIdeSymbol(textDocument, symbol, this);
 	}
 
@@ -385,6 +385,12 @@ export class Server {
 			console.log("Server got settings: " + JSON.stringify(settings));
 		}
 		this.configurationSettings = settings;
+
+		// FStarConnection objects store their own debug flag, so we need to update them all with the latest value.
+		this.documentStates.forEach((docState, uri) => {
+			docState.fstar.debug = settings.debug;
+			docState.fstar_lax.debug = settings.debug;
+		});
 	}
 
 	async refreshDocumentState(textDocument: TextDocument) {
@@ -415,8 +421,8 @@ export class Server {
 		});
 
 		// Send the initial dummy vfs-add request to the fstar processes
-		fstar.vfsAddRequest(filePath.fsPath, textDocument.getText(), this.configurationSettings.debug);
-		fstar_lax.vfsAddRequest(filePath.fsPath, textDocument.getText(), this.configurationSettings.debug);
+		fstar.vfsAddRequest(filePath.fsPath, textDocument.getText());
+		fstar_lax.vfsAddRequest(filePath.fsPath, textDocument.getText());
 	}
 
 	// Initialization of the LSP server: Called once when the workspace is opened
@@ -523,7 +529,7 @@ export class Server {
 			const lax = this.configurationSettings.flyCheck ? "lax" : undefined;
 			const fstar_conn = this.getFStarConnection(doc, lax);
 			// TODO(klinvill): should we await the response here? The autocomplete response table is populated asynchronously.
-			const responses = fstar_conn?.autocompleteRequest(wordAndRange.word, this.configurationSettings.debug);
+			const responses = fstar_conn?.autocompleteRequest(wordAndRange.word);
 			responses?.then(rs => handleIdeAutoComplete(doc, rs, this));
 		}
 		const items: CompletionItem[] = [];
@@ -687,7 +693,7 @@ export class Server {
 		// TODO(klinvill): It looks like this function can only be called for
 		// non-lax checking. Is that correct?
 		const fstar_conn = this.getFStarConnection(textDocument);
-		fstar_conn?.cancelRequest(range[0], this.configurationSettings.debug);
+		fstar_conn?.cancelRequest(range[0]);
 	}
 
 	private onKillAndRestartSolverRequest(uri: any) {
@@ -696,7 +702,7 @@ export class Server {
 		// TODO(klinvill): It looks like this function only restarts the
 		// standard F* solver (not the lax one), is this the desired behavior?
 		const fstar_conn = this.getFStarConnection(textDocument);
-		fstar_conn?.restartSolver(this.configurationSettings.debug);
+		fstar_conn?.restartSolver();
 	}
 
 	private onKillAllRequest(params: any) {
