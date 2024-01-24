@@ -13,17 +13,11 @@ import { isProtocolInfo, IdeProgress, ProtocolInfo, IdeProofState, IdeQueryRespo
 
 // For full-buffer queries, F* chunks the buffer into fragments and responds
 // with several messages, one for each fragment until the first failing
-// fragment. The series of messages ends with a full-buffer-finished. This
+// fragment. The stream of messages ends with a full-buffer-finished. This
 // behavior allows for displaying incremental progress while the rest of the
-// buffer is being checked. `partialResult` is the type of these partially
+// buffer is being checked. `StreamedResult` is the type of these partially
 // completed queries.
-//
-// TODO(klinvill): would be nice to have this be a more informative type than
-// potentially containing `undefined`. E.g. to have Continuing and Done types.
-//
-// TODO(klinvill): would also be nice to have an iterator interface for
-// partialResults (or for a wrapper type like streamResults)
-export type partialResult<T> = Promise<[T, partialResult<T> | undefined]>;
+export type StreamedResult<T> = Promise<[T, StreamedResult<T> | undefined]>;
 
 export class FStarConnection {
 	private last_query_id: number;
@@ -142,13 +136,13 @@ export class FStarConnection {
 	}
 
 	// Wrapper for a request that results in a stream of responses.
-	private async streamRequest<T, R>(query: T) : partialResult<R> {
+	private async streamRequest<T, R>(query: T) : StreamedResult<R> {
 		const expectResponse = true;
 		const is_stream = true;
 		return this.request(query, expectResponse, is_stream);
 	}
 
-	private async fullBufferQuery(query: FullBufferQuery): partialResult<IdeProgress> {
+	private async fullBufferQuery(query: FullBufferQuery): StreamedResult<IdeProgress> {
 		if (!this.fstar.supportsFullBuffer) {
 			throw new Error("ERROR: F* process does not support full-buffer queries");
 		}
@@ -156,7 +150,7 @@ export class FStarConnection {
 	}
 
 	// Send a request to F* to check the given code.
-	async fullBufferRequest(code: string, kind: 'full' | 'lax' | 'cache' | 'reload-deps', withSymbols: boolean): partialResult<IdeProgress> {
+	async fullBufferRequest(code: string, kind: 'full' | 'lax' | 'cache' | 'reload-deps', withSymbols: boolean): StreamedResult<IdeProgress> {
 		return this.fullBufferQuery({
 			query: "full-buffer",
 			args: {
@@ -174,7 +168,7 @@ export class FStarConnection {
 	// TODO(klinvill): Since this FStarConnection object is only for one F*
 	// process (lax or not), do we need the `kind` argument here or can we infer
 	// it from the F* process?
-	async partialBufferRequest(code: string, kind: 'verify-to-position' | 'lax-to-position', position: { line: number, column: number }): partialResult<IdeProgress> {
+	async partialBufferRequest(code: string, kind: 'verify-to-position' | 'lax-to-position', position: { line: number, column: number }): StreamedResult<IdeProgress> {
 		return this.fullBufferQuery({
 			query: "full-buffer",
 			args: {
@@ -282,12 +276,11 @@ export class FStarConnection {
 			// Either we expect unprompted protocol-info messages, or we expect
 			// responses to a query we sent.
 			const r = msg as IdeQueryResponse;
-			// TODO(klinvill): it appears that responses to full-buffer queries
-			// are sent with query ids with incrementing fractional components.
-			// E.g. if the query id is 2, the responses seem to come back with
-			// query ids 2, 2.1, 2.2, 2.3, etc. To deal with this behavior I
-			// truncate the responses query-id. Is this the proper behavior for
-			// this case?
+			// Note: responses to full-buffer queries are sent with query ids
+			// with non-strictly incrementing fractional components. E.g. if the
+			// query id is 2, the responses can come back with query ids 2, 2.1,
+			// 2.1, 2.1, 2.2, 2.3, etc. To get the corresponding request ID, we
+			// simply truncate the responses query-id.
 			const qid = Math.trunc(Number(r["query-id"]));
 			if (!qid) {
 				console.warn(`Ill-formed query response message: ${r}`);
@@ -376,9 +369,9 @@ export class FStarConnection {
 	}
 
 	// Handles an expected response that is part of a stream of responses. The
-	// promise is resolved with a partialResult. If this is the last expected
-	// response in the stream, the second element in the partialResult will be
-	// undefined. Otherwise, the second element in the partialResult is a
+	// promise is resolved with a `StreamedResult`. If this is the last expected
+	// response in the stream, the second element in the StreamedResult will be
+	// undefined. Otherwise, the second element in the StreamedResult is a
 	// promise that will be resolved with the next response in the stream.
 	private respondStream(qid: number, response: object, done: boolean) {
 		if (done) {
@@ -405,11 +398,6 @@ export class FStarConnection {
 	// This handler exists as part of the FStarConnection class because the
 	// ProtocolInfo messages are received unprompted from the F* process after
 	// starting it, instead of in response to a query we issue.
-	//
-	// TODO(klinvill): previously the supportsFullBuffer was set for both the
-	// lax and non-lax F* processes when a single protocol info message was
-	// received. I changed the behavior here to only set it for the process the
-	// response comes from. Does this change break anything?
 	handleProtocolInfo(pi: ProtocolInfo) {
 		if (!pi.features.includes("full-buffer")) {
 			this.fstar.supportsFullBuffer = false;

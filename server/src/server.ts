@@ -261,7 +261,7 @@ export class Server {
 		let [progress, next_promise] = await fstar_conn.fullBufferRequest(textDocument.getText(), kind, withSymbols);
 
 		// full-buffer queries result in a stream of IdeProgress responses.
-		// These are returned as `partialResult` values which are essentially
+		// These are returned as `StreamedResult` values which are essentially
 		// tuples with the next promise as the second element of the tuple. We
 		// therefore handle each of these progress messages here until there is
 		// no longer a next promise.
@@ -299,7 +299,7 @@ export class Server {
 		let [progress, next_promise] = await fstar_conn.partialBufferRequest(textDocument.getText(), kind, position);
 
 		// full-buffer queries result in a stream of IdeProgress responses.
-		// These are returned as `partialResult` values which are essentially
+		// These are returned as `StreamedResult` values which are essentially
 		// tuples with the next promise as the second element of the tuple. We
 		// therefore handle each of these progress messages here until there is
 		// no longer a next promise.
