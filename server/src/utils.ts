@@ -151,38 +151,3 @@ export function formatIdeSymbol(symbol: IdeSymbol): Hover {
 		}
 	};
 }
-
-
-////////////////////////////////////////////////////////////////////////////////////
-// Promise Utilities
-////////////////////////////////////////////////////////////////////////////////////
-
-// Type of a Promise along with its associated resolve and reject functions that
-// can be invoked outside the Promise's constructor.
-//
-// TODO(klinvill): should this type be generic with respect to both T and E? Or
-// just successfully resolved types T?
-export type internalPromise<T, E extends Error> = {promise: Promise<T>, resolve: (v: T) => void, reject: (e: E) => void};
-
-// Custom implementation of Promise.withResolvers() until it's implemented in
-// Node. This function is useful for providing access to the resolve and reject
-// functions for a Promise outside its constructor. For further details see
-// https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/withResolvers
-//
-// TODO(klinvill): should this function be generic with respect to both T and E?
-// Or just successfully resolved types T?
-export function withResolvers<T, E extends Error>(): internalPromise<T, E> {
-	// Default resolvers do nothing, but this satisfies the type checker.
-	let resolver = (v: T) => { return; };
-	let rejecter = (e: E) => { return; };
-
-	const promise = new Promise<T>((resolve, reject) => {
-		resolver = resolve;
-		rejecter = reject;
-	});
-	return {
-		promise,
-		resolve: resolver,
-		reject: rejecter
-	};
-}

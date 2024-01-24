@@ -10,7 +10,6 @@ import { setTimeout } from 'timers/promises';
 
 import { FStar, FStarConfig } from './fstar';
 import { isProtocolInfo, IdeProgress, ProtocolInfo, IdeProofState, IdeQueryResponse, IdeQueryResponseTypes, IdeSymbol, IdeError, IdeAutoCompleteResponses, FullBufferQuery, FStarRange, LookupQuery, VfsAdd, AutocompleteRequest, CancelRequest } from './fstar_messages';
-import { internalPromise, withResolvers } from './utils';
 
 // For full-buffer queries, F* chunks the buffer into fragments and responds
 // with several messages, one for each fragment until the first failing
@@ -28,12 +27,12 @@ export type partialResult<T> = Promise<[T, partialResult<T> | undefined]>;
 
 export class FStarConnection {
 	private last_query_id: number;
-	// TODO(klinvill): Should we have a stronger type for internalPromise here
-	// that is restricted to a response type and error type?
+	// TODO(klinvill): Should we have a stronger type for resolve and reject
+	// here that is restricted to a response type and error type?
 	//
 	// Maps query-ids to promises that will be resolved with the appropriate
 	// response.
-	private pending_responses: Map<number, {ip: internalPromise<any, any>, is_stream: boolean}>;
+	private pending_responses: Map<number, {resolve: (v: any) => void, reject: (e: any) => void, is_stream: boolean}>;
 	private fstar: FStar;
 
 	constructor(fstar: FStar) {
@@ -104,6 +103,7 @@ export class FStarConnection {
 	// @param expect_response indicates if a response from F* is expected for
 	// this request.
 	private async request(msg: any, debug: boolean, expect_response = true, is_stream = false): Promise<any> {
+		// TODO(klinvill): do we need to worry about racing requests here that might result in the same query-id? That would cause issues when tracking responses.
 		const qid = this.last_query_id + 1;
 		this.last_query_id = qid;
 		msg["query-id"] = '' + qid;
@@ -114,10 +114,6 @@ export class FStarConnection {
 		if (this.fstar.proc.exitCode != null) {
 			const process_name = this.fstar.lax ? "flycheck" : "checker";
 			const error_msg = "ERROR: F* " + process_name + " process exited with code " + this.fstar.proc.exitCode;
-			// TODO(klinvill): should we throw exceptions here or reject the
-			// returned promise? Although I believe the semantics of async
-			// functions are such that this will automatically result in a
-			// rejected promise?
 			throw new Error(error_msg);
 		}
 
@@ -125,22 +121,15 @@ export class FStarConnection {
 			this.fstar.proc?.stdin?.write(text);
 			this.fstar.proc?.stdin?.write("\n");
 		} catch (e) {
-			// TODO(klinvill): should we throw exceptions here or reject the
-			// returned promise? Although I believe the semantics of async
-			// functions are such that this will automatically result in a
-			// rejected promise?
 			const msg = "ERROR: Error writing to F* process: " + e;
 			throw new Error(msg);
 		}
 
-		const internal_promise =  withResolvers();
 		if (expect_response) {
 			// Only keep track of responses if we expect a response
-			this.pending_responses.set(qid, {ip: internal_promise, is_stream});
+			return new Promise((resolve, reject) =>
+				this.pending_responses.set(qid, {resolve, reject, is_stream}));
 		}
-		// TODO(klinvill): Should we always return a promise even if no response
-		// is expected? In that case the promise is just ignored.
-		return internal_promise.promise;
 	}
 
 	// Send a request to F* to check the given code.
@@ -381,7 +370,7 @@ export class FStarConnection {
 		}
 
 		this.pending_responses.delete(qid);
-		pr.ip.resolve(response);
+		pr.resolve(response);
 	}
 
 	// Handles an expected response that is part of a stream of responses. The
@@ -402,9 +391,10 @@ export class FStarConnection {
 			// The current promise needs to be resolved with the current
 			// response so we create a new promise to become the next pending
 			// response.
-			const new_ip = withResolvers();
-			this.pending_responses.set(qid, {ip: new_ip, is_stream: true});
-			pr.ip.resolve([response, new_ip.promise]);
+			const new_promise = new Promise((resolve, reject) => {
+				this.pending_responses.set(qid, {resolve, reject, is_stream: true});
+			});
+			pr.resolve([response, new_promise]);
 		}
 	}
 
