@@ -34,8 +34,8 @@ import { formatIdeProofState, formatIdeSymbol, fstarRangeAsRange, mkPosition, qu
 import { ClientConnection } from './client_connection';
 import { FStarConnection } from './fstar_connection';
 import { FStar } from './fstar';
-import { FStarRange, IdeAutoCompleteResponses, IdeSymbol, IdeProofState } from './fstar_messages';
-import { handleIdeAutoComplete, handleIdeProgress, handleIdeSymbol } from './fstar_handlers';
+import { FStarRange, IdeAutoCompleteResponses, IdeSymbol, IdeProofState, IdeErrors, isIdeErrors, IdeProgress } from './fstar_messages';
+import { handleIdeAutoComplete, handleIdeDiagnostics, handleIdeProgress, handleIdeSymbol } from './fstar_handlers';
 
 // LSP Server
 //
@@ -258,18 +258,30 @@ export class Server {
 		}
 		const fstar_conn = this.getFStarConnection(textDocument, lax);
 		if (!fstar_conn) { return; }
-		let [progress, next_promise] = await fstar_conn.fullBufferRequest(textDocument.getText(), kind, withSymbols);
+		let [progress_or_error, next_promise] = await fstar_conn.fullBufferRequest(textDocument.getText(), kind, withSymbols);
 
 		// full-buffer queries result in a stream of IdeProgress responses.
 		// These are returned as `StreamedResult` values which are essentially
 		// tuples with the next promise as the second element of the tuple. We
 		// therefore handle each of these progress messages here until there is
 		// no longer a next promise.
+		//
+		// TODO(klinvill): could add a nicer API to consume a streamed result without needing to continuosly check next_promise.
 		while (next_promise) {
-			handleIdeProgress(textDocument, progress, lax === 'lax', this);
-			[progress, next_promise] = await next_promise;
+			if (isIdeErrors(progress_or_error)) {
+				const errors = (progress_or_error as IdeErrors).contents;
+				handleIdeDiagnostics(textDocument, errors, lax === 'lax', this);
+			} else {
+				handleIdeProgress(textDocument, progress_or_error as IdeProgress, lax === 'lax', this);
+			}
+			[progress_or_error, next_promise] = await next_promise;
 		}
-		handleIdeProgress(textDocument, progress, lax === 'lax', this);
+		if (isIdeErrors(progress_or_error)) {
+			const errors = (progress_or_error as IdeErrors).contents;
+			handleIdeDiagnostics(textDocument, errors, lax === 'lax', this);
+		} else {
+			handleIdeProgress(textDocument, progress_or_error as IdeProgress, lax === 'lax', this);
+		}
 	}
 
 	async validateFStarDocumentToPosition(textDocument: TextDocument, kind: 'verify-to-position' | 'lax-to-position', position: { line: number, column: number }) {
@@ -296,16 +308,29 @@ export class Server {
 
 		const fstar_conn = this.getFStarConnection(textDocument, lax);
 		if (!fstar_conn) { return; }
-		let [progress, next_promise] = await fstar_conn.partialBufferRequest(textDocument.getText(), kind, position);
+		let [progress_or_error, next_promise] = await fstar_conn.partialBufferRequest(textDocument.getText(), kind, position);
 
 		// full-buffer queries result in a stream of IdeProgress responses.
 		// These are returned as `StreamedResult` values which are essentially
 		// tuples with the next promise as the second element of the tuple. We
 		// therefore handle each of these progress messages here until there is
 		// no longer a next promise.
+		//
+		// TODO(klinvill): could add a nicer API to consume a streamed result without needing to continuosly check next_promise.
 		while (next_promise) {
-			handleIdeProgress(textDocument, progress, lax === 'lax', this);
-			[progress, next_promise] = await next_promise;
+			if (isIdeErrors(progress_or_error)) {
+				const errors = (progress_or_error as IdeErrors).contents;
+				handleIdeDiagnostics(textDocument, errors, lax === 'lax', this);
+			} else {
+				handleIdeProgress(textDocument, progress_or_error as IdeProgress, lax === 'lax', this);
+			}
+			[progress_or_error, next_promise] = await next_promise;
+		}
+		if (isIdeErrors(progress_or_error)) {
+			const errors = (progress_or_error as IdeErrors).contents;
+			handleIdeDiagnostics(textDocument, errors, lax === 'lax', this);
+		} else {
+			handleIdeProgress(textDocument, progress_or_error as IdeProgress, lax === 'lax', this);
 		}
 	}
 

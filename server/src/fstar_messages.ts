@@ -112,6 +112,18 @@ export interface IdeQueryResponse {
 
 export type IdeResponse = IdeQueryResponse | ProtocolInfo
 
+// An extension to the `IdeError[]` type that includes a `kind` field to easily
+// identify when an error response is received instead of the expected type,
+// such as `IdeProgress`.
+export interface IdeErrors {
+	kind: 'errors';
+	contents: IdeError[];
+}
+
+export function isIdeErrors(object: any): boolean {
+	return object
+		&& object.kind && object.kind === 'errors';
+}
 
 ////////////////////////////////////////////////////////////////////////////////////
 // Request messages in the IDE protocol that fstar.exe uses

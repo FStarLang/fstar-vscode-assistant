@@ -9,7 +9,7 @@ import {
 import { setTimeout } from 'timers/promises';
 
 import { FStar, FStarConfig } from './fstar';
-import { isProtocolInfo, IdeProgress, ProtocolInfo, IdeProofState, IdeQueryResponse, IdeQueryResponseTypes, IdeSymbol, IdeError, IdeAutoCompleteResponses, FullBufferQuery, FStarRange, LookupQuery, VfsAdd, AutocompleteRequest, CancelRequest } from './fstar_messages';
+import { isProtocolInfo, IdeProgress, ProtocolInfo, IdeProofState, IdeQueryResponse, IdeQueryResponseTypes, IdeSymbol, IdeError, IdeErrors, IdeAutoCompleteResponses, FullBufferQuery, FStarRange, LookupQuery, VfsAdd, AutocompleteRequest, CancelRequest } from './fstar_messages';
 
 // For full-buffer queries, F* chunks the buffer into fragments and responds
 // with several messages, one for each fragment until the first failing
@@ -142,7 +142,7 @@ export class FStarConnection {
 		return this.request(query, expectResponse, is_stream);
 	}
 
-	private async fullBufferQuery(query: FullBufferQuery): StreamedResult<IdeProgress> {
+	private async fullBufferQuery(query: FullBufferQuery): StreamedResult<IdeProgress | IdeErrors> {
 		if (!this.fstar.supportsFullBuffer) {
 			throw new Error("ERROR: F* process does not support full-buffer queries");
 		}
@@ -150,7 +150,7 @@ export class FStarConnection {
 	}
 
 	// Send a request to F* to check the given code.
-	async fullBufferRequest(code: string, kind: 'full' | 'lax' | 'cache' | 'reload-deps', withSymbols: boolean): StreamedResult<IdeProgress> {
+	async fullBufferRequest(code: string, kind: 'full' | 'lax' | 'cache' | 'reload-deps', withSymbols: boolean): StreamedResult<IdeProgress | IdeErrors> {
 		return this.fullBufferQuery({
 			query: "full-buffer",
 			args: {
@@ -168,7 +168,7 @@ export class FStarConnection {
 	// TODO(klinvill): Since this FStarConnection object is only for one F*
 	// process (lax or not), do we need the `kind` argument here or can we infer
 	// it from the F* process?
-	async partialBufferRequest(code: string, kind: 'verify-to-position' | 'lax-to-position', position: { line: number, column: number }): StreamedResult<IdeProgress> {
+	async partialBufferRequest(code: string, kind: 'verify-to-position' | 'lax-to-position', position: { line: number, column: number }): StreamedResult<IdeProgress | IdeErrors> {
 		return this.fullBufferQuery({
 			query: "full-buffer",
 			args: {
@@ -320,27 +320,25 @@ export class FStarConnection {
 						this.respond(qid, r.response);
 					}
 				} else if (responseType === 'error') {
-					// TODO(klinvill): Should we instead reject the promise
-					// here? Or pass along the error responses as the resolved
-					// promise value?
-					//
 					// TODO(klinvill): What requests can IdeError be sent in
-					// response to? All of them? Right now there's not a request
-					// method with a return type that include IdeError.
+					// response to? All of them? Right now only the
+					// fullBufferQuery() methods have a return type that include
+					// IdeError.
                     const pr = this.pending_responses.get(qid);
 					if (!pr) {
 						console.warn(`No inflight query found for query-id: ${qid}, got response: ${JSON.stringify(r.response)}.`);
 						return;
 					}
+					const errors = {kind: 'errors', contents: r.response as IdeError[]};
 					// Errors can be sent in response to a request that results
                     // in streams (like full-buffer queries). We therefore check
                     // if the response is part of a stream and handle it
                     // accordingly.
 					if (pr.is_stream) {
 						// TODO(klinvill): Can an error message end a full-buffer stream? Or will it always only end with a full-buffer-finished message?
-						this.respondStream(qid, r.response as IdeError[], false);
+						this.respondStream(qid, errors, false);
 					} else {
-						this.respond(qid, r.response as IdeError[]);
+						this.respond(qid, errors);
 					}
 				} else if (responseType === 'auto-complete') {
 					this.respond(qid, r.response as IdeAutoCompleteResponses);
