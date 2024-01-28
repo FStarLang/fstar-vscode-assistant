@@ -119,7 +119,7 @@ export interface IdeQueryResponse< R extends IdeQueryResponseTypes | undefined, 
 // Convenience wrappers for the IdeQueryResponse type
 export type IdeQueryResponseR<R extends IdeQueryResponseTypes> = IdeQueryResponse<R, undefined>;
 export type IdeQueryResponseC<C extends IdeStatusContentsTypes> = IdeQueryResponse<undefined, C>;
-export type AnyIdeQueryResponse = IdeQueryResponse<IdeQueryResponseTypes, IdeStatusContentsTypes>;
+export type AnyIdeQueryResponse = IdeQueryResponseR<IdeQueryResponseTypes> | IdeQueryResponseC<IdeStatusContentsTypes>;
 
 export type IdeResponse = AnyIdeQueryResponse | ProtocolInfo
 
