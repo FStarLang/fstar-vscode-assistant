@@ -32,9 +32,6 @@ export function handleIdeSymbol(textDocument: TextDocument, response: IdeSymbol,
 }
 
 // If we get a proof state dump message, we store it in the proof state map
-//
-// TODO(klinvill): with my latest edits, this function isn't called anywhere.
-// Where should it be handled? server.ts? fstar_connection.ts?
 export function handleIdeProofState(textDocument: TextDocument, response: IdeProofState, server: Server) {
 	// console.log("Got ide proof state " + JSON.stringify(response));
 	const range_key = response.location.beg[0];
@@ -141,11 +138,7 @@ export function handleIdeProgress(textDocument: TextDocument, contents: IdeProgr
 }
 
 // If we get errors and warnings from F*, we send them to VSCode as diagnostics,
-// which will show them as squiggles in the editor
-//
-// TODO(klinvill): with my latest edits, this function is only called for
-// fullBufferQuery requests. Should it also be called for other requests? What
-// about ones for which responses aren't expected?
+// which will show them as squiggles in the editor.
 export function handleIdeDiagnostics(textDocument: TextDocument, response: IdeError[], lax: boolean, server: Server) {
 	function ideErrorLevelAsDiagnosticSeverity(level: string): DiagnosticSeverity {
 		switch (level) {

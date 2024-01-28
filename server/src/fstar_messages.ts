@@ -71,6 +71,9 @@ export interface IdeProofStateGoal {
 }
 
 // IDEError: fstar.exe sends this message when reporting errors and warnings
+//
+// TODO(klinvill): These status messages aren't necessarily errors. Maybe should
+// be renamed to `IdeDiagnostic` (following the `handleIdeDiagnostics` name)?
 export interface IdeError {
 	message: string;
 	number: number;
@@ -100,30 +103,25 @@ export type IdeAutoCompleteResponse = [number, string, string];
 export type IdeAutoCompleteResponses = IdeAutoCompleteResponse[];
 export type IdeQueryResponseTypes = IdeSymbol | IdeError | IdeError[] | IdeAutoCompleteResponses;
 
+// Status message contents
+export type IdeStatusContentsTypes = IdeProofState | IdeSymbol | IdeProgress;
+
 // A query response envelope
-export interface IdeQueryResponse {
+export interface IdeQueryResponse< R extends IdeQueryResponseTypes | undefined, C extends IdeStatusContentsTypes | undefined > {
 	'query-id': string;
 	kind: 'protocol-info' | 'response' | 'message';
 	status?: 'success' | 'failure';
 	level?: 'progress' | 'proof-state' | 'info';
-	response?: IdeQueryResponseTypes;
-	contents?: IdeProofState | IdeSymbol | IdeProgress;
+	response?: R;
+	contents?: C;
 }
 
-export type IdeResponse = IdeQueryResponse | ProtocolInfo
+// Convenience wrappers for the IdeQueryResponse type
+export type IdeQueryResponseR<R extends IdeQueryResponseTypes> = IdeQueryResponse<R, undefined>;
+export type IdeQueryResponseC<C extends IdeStatusContentsTypes> = IdeQueryResponse<undefined, C>;
+export type AnyIdeQueryResponse = IdeQueryResponse<IdeQueryResponseTypes, IdeStatusContentsTypes>;
 
-// An extension to the `IdeError[]` type that includes a `kind` field to easily
-// identify when an error response is received instead of the expected type,
-// such as `IdeProgress`.
-export interface IdeErrors {
-	kind: 'errors';
-	contents: IdeError[];
-}
-
-export function isIdeErrors(object: any): boolean {
-	return object
-		&& object.kind && object.kind === 'errors';
-}
+export type IdeResponse = AnyIdeQueryResponse | ProtocolInfo
 
 ////////////////////////////////////////////////////////////////////////////////////
 // Request messages in the IDE protocol that fstar.exe uses
