@@ -13,7 +13,7 @@ import * as crypto from 'crypto';
 
 import { Server } from './server';
 import { StatusOkMessage, ok_kind } from './client_connection';
-import { IdeSymbol, IdeProofState, IdeError, IdeProgress, IdeAutoCompleteResponses, FStarRange } from './fstar_messages';
+import { IdeSymbol, IdeProofState, IdeError, IdeProgress, IdeAutoCompleteOptions, FStarRange } from './fstar_messages';
 import { mkPosition, fstarRangeAsRange, qualifyFilename } from './utils';
 
 
@@ -220,7 +220,7 @@ export function handleIdeDiagnostics(textDocument: TextDocument, response: IdeEr
 	}
 }
 
-export function handleIdeAutoComplete(textDocument: TextDocument, response: IdeAutoCompleteResponses, server: Server) {
+export function handleIdeAutoComplete(textDocument: TextDocument, response: IdeAutoCompleteOptions, server: Server) {
 	if (!response || !(Array.isArray(response))) { return; }
 	const doc_state = server.getDocumentState(textDocument.uri);
 	if (!doc_state) { return; }

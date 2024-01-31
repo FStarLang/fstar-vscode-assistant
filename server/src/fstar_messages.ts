@@ -99,29 +99,72 @@ export interface IdeProgress {
 
 
 // An auto-complete response
-export type IdeAutoCompleteResponse = [number, string, string];
-export type IdeAutoCompleteResponses = IdeAutoCompleteResponse[];
-export type IdeQueryResponseTypes = IdeSymbol | IdeError | IdeError[] | IdeAutoCompleteResponses;
+export type IdeAutoCompleteOption = [number, string, string];
+export type IdeAutoCompleteOptions = IdeAutoCompleteOption[];
 
-// Status message contents
-export type IdeStatusContentsTypes = IdeProofState | IdeSymbol | IdeProgress;
-
-// A query response envelope
-export interface IdeQueryResponse< R extends IdeQueryResponseTypes | undefined, C extends IdeStatusContentsTypes | undefined > {
+// Replies from F* either take the form of response messages or status messages.
+// See
+// https://github.com/FStarLang/FStar/wiki/Editor-support-for-F*#message-format
+// for more details.
+//
+// Common response message format from F*. Sent in response to a query.
+export interface IdeQueryResponse {
 	'query-id': string;
-	kind: 'protocol-info' | 'response' | 'message';
-	status?: 'success' | 'failure';
-	level?: 'progress' | 'proof-state' | 'info';
-	response?: R;
-	contents?: C;
+	kind: 'response';
+	status: 'success' | 'failure';
 }
 
-// Convenience wrappers for the IdeQueryResponse type
-export type IdeQueryResponseR<R extends IdeQueryResponseTypes> = IdeQueryResponse<R, undefined>;
-export type IdeQueryResponseC<C extends IdeStatusContentsTypes> = IdeQueryResponse<undefined, C>;
-export type AnyIdeQueryResponse = IdeQueryResponseR<IdeQueryResponseTypes> | IdeQueryResponseC<IdeStatusContentsTypes>;
+// Common status message format from F*. Sent in response to a query.
+export interface IdeQueryMessage {
+	'query-id': string;
+	kind: 'message';
+	level: 'error' | 'warning' | 'info' | 'progress' | 'proof-state';
+}
 
-export type IdeResponse = AnyIdeQueryResponse | ProtocolInfo
+export interface IdeProgressResponse extends IdeQueryMessage {
+	level: 'progress';
+	contents: IdeProgress;
+}
+
+// Documented at https://github.com/FStarLang/FStar/wiki/Editor-support-for-F*#error-warning-info-messages
+export interface IdeStatusResponse extends IdeQueryMessage {
+	level: 'error' | 'warning' | 'info';
+	contents: string;
+}
+
+// Documented at https://github.com/FStarLang/FStar/wiki/Editor-support-for-F*#proof-state
+export interface IdeProofStateResponse extends IdeQueryMessage {
+	kind: 'message';
+	level: 'proof-state';
+	contents: IdeProofState;
+}
+
+// Documented at https://github.com/FStarLang/FStar/wiki/Editor-support-for-F*#lookup
+export interface IdeSymbolResponse extends IdeQueryResponse {
+	response: IdeSymbol;
+}
+
+// Documented at https://github.com/FStarLang/FStar/wiki/Editor-support-for-F*#push
+export interface IdeDiagnosticsResponse extends IdeQueryResponse {
+	response: IdeError[];
+}
+
+// Replies stemming from full-buffer interruptions seem to have an empty (null)
+// value for the response field
+export interface IdeInterruptedResponse extends IdeQueryResponse {
+	response: null;
+}
+
+// Documented at https://github.com/FStarLang/FStar/wiki/Editor-support-for-F*#auto-complete
+export interface IdeAutoCompleteResponse extends IdeQueryResponse {
+	response: IdeAutoCompleteOptions;
+}
+
+export type IdeResponse = ProtocolInfo | IdeProgressResponse | IdeStatusResponse | IdeProofStateResponse | IdeSymbolResponse | IdeDiagnosticsResponse | IdeInterruptedResponse | IdeAutoCompleteResponse;
+
+// Most queries seem to have only one kind of expected response, but full-buffer
+// queries can respond with a large variety of messages.
+export type FullBufferQueryResponse = IdeProgressResponse | IdeStatusResponse | IdeProofStateResponse | IdeSymbolResponse | IdeDiagnosticsResponse | IdeInterruptedResponse;
 
 ////////////////////////////////////////////////////////////////////////////////////
 // Request messages in the IDE protocol that fstar.exe uses

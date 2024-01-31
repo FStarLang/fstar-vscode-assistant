@@ -34,7 +34,7 @@ import { formatIdeProofState, formatIdeSymbol, fstarRangeAsRange, mkPosition, qu
 import { ClientConnection } from './client_connection';
 import { FStarConnection, StreamedResult } from './fstar_connection';
 import { FStar } from './fstar';
-import { FStarRange, IdeAutoCompleteResponses, IdeSymbol, IdeProofState, IdeProgress, AnyIdeQueryResponse, IdeError } from './fstar_messages';
+import { FStarRange, IdeAutoCompleteOptions, IdeSymbol, IdeProofState, IdeProgress, IdeError, FullBufferQueryResponse } from './fstar_messages';
 import { handleIdeAutoComplete, handleIdeDiagnostics, handleIdeProgress, handleIdeProofState, handleIdeSymbol } from './fstar_handlers';
 
 // LSP Server
@@ -292,7 +292,7 @@ export class Server {
 		this.handleFullBufferResponse(response, textDocument, lax);
 	}
 
-	private async handleFullBufferResponse(promise: StreamedResult<AnyIdeQueryResponse>, textDocument: TextDocument, lax?: 'lax') {
+	private async handleFullBufferResponse(promise: StreamedResult<FullBufferQueryResponse>, textDocument: TextDocument, lax?: 'lax') {
 		let [response, next_promise] = await promise;
 
 		// full-buffer queries result in a stream of IdeProgress responses.
@@ -309,7 +309,7 @@ export class Server {
 		this.handleSingleFullBufferResponse(response, textDocument, lax);
 	}
 
-	private async handleSingleFullBufferResponse(response: AnyIdeQueryResponse, textDocument: TextDocument, lax?: 'lax') {
+	private async handleSingleFullBufferResponse(response: FullBufferQueryResponse, textDocument: TextDocument, lax?: 'lax') {
 		if (response.kind === 'message' && response.level === 'progress') {
 			handleIdeProgress(textDocument, response.contents as IdeProgress, lax === 'lax', this);
 		} else if (response.kind === 'message' && response.level === 'info') {
@@ -546,7 +546,7 @@ export class Server {
 			return [];
 		}
 		let shouldSendRequest = false;
-		let bestMatch: { key: string; value: IdeAutoCompleteResponses } = { key: "", value: [] };
+		let bestMatch: { key: string; value: IdeAutoCompleteOptions } = { key: "", value: [] };
 		autoCompleteResponses.auto_completions.forEach((response) => {
 			if (response.key.length > bestMatch.key.length) {
 				bestMatch = response;
@@ -561,7 +561,7 @@ export class Server {
 			const fstar_conn = this.getFStarConnection(doc, lax);
 			// TODO(klinvill): should we await the response here? The autocomplete response table is populated asynchronously.
 			const responses = fstar_conn?.autocompleteRequest(wordAndRange.word);
-			responses?.then(rs => handleIdeAutoComplete(doc, rs.response as IdeAutoCompleteResponses, this));
+			responses?.then(rs => handleIdeAutoComplete(doc, rs.response as IdeAutoCompleteOptions, this));
 		}
 		const items: CompletionItem[] = [];
 		// TODO(klinvill): maybe replace this with a map() call?
@@ -769,7 +769,7 @@ interface DocumentState {
 	// A proof-state table populated by fstar_ide when running tactics, displayed in onHover
 	hover_proofstate_info: Map<number, IdeProofState>;
 	// A table of auto-complete responses
-	auto_complete_info: Map<string, IdeAutoCompleteResponses>;
+	auto_complete_info: Map<string, IdeAutoCompleteOptions>;
 	// A flag to indicate if the prefix of the buffer is stale
 	prefix_stale: boolean;
 }

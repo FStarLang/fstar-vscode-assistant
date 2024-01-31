@@ -9,7 +9,7 @@ import {
 import { setTimeout } from 'timers/promises';
 
 import { FStar, FStarConfig } from './fstar';
-import { isProtocolInfo, IdeProgress, ProtocolInfo,  IdeSymbol, IdeAutoCompleteResponses, FullBufferQuery, FStarRange, LookupQuery, VfsAdd, AutocompleteRequest, CancelRequest,  AnyIdeQueryResponse, IdeQueryResponseR } from './fstar_messages';
+import { isProtocolInfo, ProtocolInfo, FullBufferQuery, FStarRange, LookupQuery, VfsAdd, AutocompleteRequest, CancelRequest, FullBufferQueryResponse, IdeSymbolResponse, IdeAutoCompleteResponse, IdeQueryResponse, IdeQueryMessage, IdeProgressResponse} from './fstar_messages';
 
 // For full-buffer queries, F* chunks the buffer into fragments and responds
 // with several messages, one for each fragment until the first failing
@@ -28,11 +28,8 @@ export class FStarConnection {
 	// response.
 	private pending_responses: Map<number, {resolve: (v: any) => void, reject: (e: any) => void, is_stream: boolean}>;
 	private fstar: FStar;
-	debug: boolean;
 
-	constructor(fstar: FStar, debug: boolean) {
-		this.debug = debug;
-
+	constructor(fstar: FStar, public debug: boolean) {
 		// F*'s IDE protocol requires that each request have a unique query-id.
 		// We use a monotonic id.
 		this.last_query_id = 0;
@@ -146,7 +143,7 @@ export class FStarConnection {
 	// progress messages, proof-state messages, and status messages. Due to this
 	// variety of responses, the full response is returned wrapped within a
 	// `StreamedResult` object.
-	private async fullBufferQuery(query: FullBufferQuery): StreamedResult<AnyIdeQueryResponse> {
+	private async fullBufferQuery(query: FullBufferQuery): StreamedResult<FullBufferQueryResponse> {
 		if (!this.fstar.supportsFullBuffer) {
 			throw new Error("ERROR: F* process does not support full-buffer queries");
 		}
@@ -154,7 +151,7 @@ export class FStarConnection {
 	}
 
 	// Send a request to F* to check the given code.
-	async fullBufferRequest(code: string, kind: 'full' | 'lax' | 'cache' | 'reload-deps', withSymbols: boolean): StreamedResult<AnyIdeQueryResponse> {
+	async fullBufferRequest(code: string, kind: 'full' | 'lax' | 'cache' | 'reload-deps', withSymbols: boolean): StreamedResult<FullBufferQueryResponse> {
 		return this.fullBufferQuery({
 			query: "full-buffer",
 			args: {
@@ -172,7 +169,7 @@ export class FStarConnection {
 	// TODO(klinvill): Since this FStarConnection object is only for one F*
 	// process (lax or not), do we need the `kind` argument here or can we infer
 	// it from the F* process?
-	async partialBufferRequest(code: string, kind: 'verify-to-position' | 'lax-to-position', position: { line: number, column: number }): StreamedResult<AnyIdeQueryResponse> {
+	async partialBufferRequest(code: string, kind: 'verify-to-position' | 'lax-to-position', position: { line: number, column: number }): StreamedResult<FullBufferQueryResponse> {
 		return this.fullBufferQuery({
 			query: "full-buffer",
 			args: {
@@ -190,7 +187,7 @@ export class FStarConnection {
 	//
 	// For more details, see:
 	// https://github.com/FStarLang/FStar/wiki/Editor-support-for-F*#lookup
-	async lookupQuery(filePath: string, position: Position, word: string, range: FStarRange): Promise<IdeQueryResponseR<IdeSymbol>> {
+	async lookupQuery(filePath: string, position: Position, word: string, range: FStarRange): Promise<IdeSymbolResponse> {
 		const query: LookupQuery = {
 			query: "lookup",
 			args: {
@@ -228,7 +225,7 @@ export class FStarConnection {
 	//
 	// For more details, see:
 	// https://github.com/FStarLang/FStar/wiki/Editor-support-for-F*#auto-complete
-	async autocompleteRequest(word: string) : Promise<IdeQueryResponseR<IdeAutoCompleteResponses>> {
+	async autocompleteRequest(word: string) : Promise<IdeAutoCompleteResponse> {
 		const query: AutocompleteRequest = {
 			"query": "autocomplete",
 			"args": {
@@ -279,7 +276,7 @@ export class FStarConnection {
 		} else {
 			// Either we expect unprompted protocol-info messages, or we expect
 			// responses to a query we sent.
-			const r = msg as AnyIdeQueryResponse;
+			const r = msg as IdeQueryResponse | IdeQueryMessage;
 			// Note: responses to full-buffer queries are sent with query ids
 			// with non-strictly incrementing fractional components. E.g. if the
 			// query id is 2, the responses can come back with query ids 2, 2.1,
@@ -301,7 +298,7 @@ export class FStarConnection {
 			// the promise is then responsible for parsing the response.
 			if (pr.is_stream) {
 				// TODO(klinvill): Is there any other way to end a stream than with a full-buffer-finished message?
-				const done = r.kind === 'message' && r.level === 'progress' && (r.contents as IdeProgress).stage === 'full-buffer-finished';
+				const done = r.kind === 'message' && r.level === 'progress' && ((r as IdeProgressResponse).contents).stage === 'full-buffer-finished';
 
 				this.respondStream(qid, r, done);
 			} else {
