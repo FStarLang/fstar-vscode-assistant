@@ -313,13 +313,15 @@ export class Server {
 		if (response.kind === 'message' && response.level === 'progress') {
 			handleIdeProgress(textDocument, response.contents as IdeProgress, lax === 'lax', this);
 		} else if (response.kind === 'message' && response.level === 'info') {
-			// TODO(klinvill): info messages are just logged and don't resolve
-			// the corresponding pending_responses promise. Is this the right
-			// behavior (that info messages are just extraneous and should be
-			// logged and ignored)? Is this the right place to log these
-			// messages or should we handle this within the FStarConnection
-			// object?
-			console.log("Info: " + response.contents);
+			console.info("Info: " + response.contents);
+		} else if (response.kind === 'message' && response.level === 'error') {
+			// TODO(klinvill): Would be nice to surface these as diagnostics
+			// that show where F* crashed.
+			console.error("Error: " + response.contents);
+		} else if (response.kind === 'message' && response.level === 'warning') {
+			// TODO(klinvill): Would be nice to surface these as diagnostics
+			// that show the lines that caused F* to emit a warning.
+			console.warn("Warning: " + response.contents);
 		} else if (response.kind === 'message' && response.level === 'proof-state') {
 			handleIdeProofState(textDocument, response.contents as IdeProofState, this);
 		} else if (response.kind === 'response') {
