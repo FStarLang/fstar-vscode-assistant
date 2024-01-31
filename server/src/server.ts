@@ -451,9 +451,11 @@ export class Server {
 			prefix_stale: false,
 		});
 
-		// Send the initial dummy vfs-add request to the fstar processes
-		fstar.vfsAddRequest(filePath.fsPath, textDocument.getText());
-		fstar_lax.vfsAddRequest(filePath.fsPath, textDocument.getText());
+		// Send the initial dummy vfs-add request to the fstar processes.
+		fstar.vfsAddRequest(filePath.fsPath, textDocument.getText())
+			.catch(e => console.error(`vfs-add request to F* process failed: ${e}`));
+		fstar_lax.vfsAddRequest(filePath.fsPath, textDocument.getText())
+			.catch(e => console.error(`vfs-add request to lax F* process failed: ${e}`));
 	}
 
 	// Initialization of the LSP server: Called once when the workspace is opened

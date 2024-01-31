@@ -9,7 +9,7 @@ import {
 import { setTimeout } from 'timers/promises';
 
 import { FStar, FStarConfig } from './fstar';
-import { isProtocolInfo, ProtocolInfo, FullBufferQuery, FStarRange, LookupQuery, VfsAdd, AutocompleteRequest, CancelRequest, FullBufferQueryResponse, IdeSymbolResponse, IdeAutoCompleteResponse, IdeQueryResponse, IdeQueryMessage, IdeProgressResponse} from './fstar_messages';
+import { isProtocolInfo, ProtocolInfo, FullBufferQuery, FStarRange, LookupQuery, VfsAdd, AutocompleteRequest, CancelRequest, FullBufferQueryResponse, IdeSymbolResponse, IdeAutoCompleteResponse, IdeQueryResponse, IdeQueryMessage, IdeProgressResponse, IdeVfsAddResponse} from './fstar_messages';
 
 // For full-buffer queries, F* chunks the buffer into fragments and responds
 // with several messages, one for each fragment until the first failing
@@ -209,7 +209,7 @@ export class FStarConnection {
 	//
 	// For more details, see:
 	// https://github.com/FStarLang/FStar/wiki/Editor-support-for-F*#vfs-add
-	async vfsAddRequest(filePath: string, contents: string) {
+	async vfsAddRequest(filePath: string, contents: string) : Promise<IdeVfsAddResponse> {
 		const query: VfsAdd = {
 			query: "vfs-add",
 			args: {
@@ -217,7 +217,7 @@ export class FStarConnection {
 				contents: contents
 			}
 		};
-		this.silentRequest(query);
+		return this.request(query);
 	}
 
 	// Request to get a list of completions for the given word (commonly a

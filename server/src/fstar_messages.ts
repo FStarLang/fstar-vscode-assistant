@@ -160,6 +160,11 @@ export interface IdeAutoCompleteResponse extends IdeQueryResponse {
 	response: IdeAutoCompleteOptions;
 }
 
+// Documented at https://github.com/FStarLang/FStar/wiki/Editor-support-for-F*#vfs-add
+export interface IdeVfsAddResponse extends IdeQueryResponse {
+	response: null;
+}
+
 export type IdeResponse = ProtocolInfo | IdeProgressResponse | IdeStatusResponse | IdeProofStateResponse | IdeSymbolResponse | IdeDiagnosticsResponse | IdeInterruptedResponse | IdeAutoCompleteResponse;
 
 // Most queries seem to have only one kind of expected response, but full-buffer
