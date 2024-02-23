@@ -234,8 +234,8 @@ function handleStatusClear (msg: StatusClearMessage): void {
 }
 
 // This function is called by the server in case F* crashed or was killed
-function handleAlert(msg: AlertMessage) {
-	vscode.window.showErrorMessage(msg.message + "\n On document: " + msg.uri);
+async function handleAlert(msg: AlertMessage) {
+	await vscode.window.showErrorMessage(msg.message + "\n On document: " + msg.uri);
 }
 
 function handleDiagnostics(msg: DiagnosticsMessage) {
@@ -334,45 +334,45 @@ export function activate(context: ExtensionContext) {
 		client.onNotification('fstar-vscode-assistant/alert', handleAlert);
 		client.onNotification('fstar-vscode-assistant/diagnostics', handleDiagnostics);
 		client.onNotification('fstar-vscode-assistant/clearDiagnostics', handleClearDiagnostics);
-	});
+	}).catch(() => {});
 	vscode.window.onDidChangeActiveTextEditor(handleDidChangeActiveEditor);
 
 	// register a command for Ctrl+.
-	const verifyCommand = vscode.commands.registerTextEditorCommand('fstar-vscode-assistant/verify-to-position', (textEditor, edit) => {
+	const verifyCommand = vscode.commands.registerTextEditorCommand('fstar-vscode-assistant/verify-to-position', async (textEditor, edit) => {
 		// console.log('Client: Command <verify-to-position> executed with uri: ' + textEditor.document.uri + " at positon " + textEditor.selection.active.line + ", " + textEditor.selection.active.character);
-		client.sendRequest('fstar-vscode-assistant/verify-to-position', [textEditor.document.uri.toString(), textEditor.selection.active]);
+		await client.sendRequest('fstar-vscode-assistant/verify-to-position', [textEditor.document.uri.toString(), textEditor.selection.active]);
 	});
 	context.subscriptions.push(verifyCommand);
 
 	// register a command for Ctrl+;,Ctrl+.
-	const reloadAndVerifyCommand = vscode.commands.registerTextEditorCommand('fstar-vscode-assistant/restart', (textEditor, edit) => {
+	const reloadAndVerifyCommand = vscode.commands.registerTextEditorCommand('fstar-vscode-assistant/restart', async (textEditor, edit) => {
 		// console.log('Client: Command <restart> executed with uri: ' + textEditor.document.uri);
-		client.sendRequest('fstar-vscode-assistant/restart', textEditor.document.uri.toString());
+		await client.sendRequest('fstar-vscode-assistant/restart', textEditor.document.uri.toString());
 	});
 	context.subscriptions.push(reloadAndVerifyCommand);
 
 	// register a command for Ctrl+Shift+.
-	const laxVerifyCommand = vscode.commands.registerTextEditorCommand('fstar-vscode-assistant/lax-to-position', (textEditor, edit) => {
+	const laxVerifyCommand = vscode.commands.registerTextEditorCommand('fstar-vscode-assistant/lax-to-position', async (textEditor, edit) => {
 		// console.log('Client: Command <lax-to-position> executed with uri: ' + textEditor.document.uri + " at positon " + textEditor.selection.active.line + ", " + textEditor.selection.active.character);
-		client.sendRequest('fstar-vscode-assistant/lax-to-position', [textEditor.document.uri.toString(), textEditor.selection.active]);
+		await client.sendRequest('fstar-vscode-assistant/lax-to-position', [textEditor.document.uri.toString(), textEditor.selection.active]);
 	});
 	context.subscriptions.push(laxVerifyCommand);
 
 	const killAndRestartSolverCommand =
-		vscode.commands.registerTextEditorCommand('fstar-vscode-assistant/kill-and-restart-solver', (textEditor, edit) => {
-		client.sendRequest('fstar-vscode-assistant/kill-and-restart-solver', [textEditor.document.uri.toString()]);
+		vscode.commands.registerTextEditorCommand('fstar-vscode-assistant/kill-and-restart-solver', async (textEditor, edit) => {
+		await client.sendRequest('fstar-vscode-assistant/kill-and-restart-solver', [textEditor.document.uri.toString()]);
 	});
 	context.subscriptions.push(killAndRestartSolverCommand);
 	
 	const killAllCommand =
-		vscode.commands.registerTextEditorCommand('fstar-vscode-assistant/kill-all', (textEditor, edit) => {
-		client.sendRequest('fstar-vscode-assistant/kill-all', []);
+		vscode.commands.registerTextEditorCommand('fstar-vscode-assistant/kill-all', async (textEditor, edit) => {
+		await client.sendRequest('fstar-vscode-assistant/kill-all', []);
 	});
 	context.subscriptions.push(killAllCommand);
 
 	// console.log("Activate called on " + context.asAbsolutePath("/"));
 
-	workspace.onDidChangeTextDocument((event) => {
+	workspace.onDidChangeTextDocument(async (event) => {
 		// console.log("OnDidChangeTextDocument");
 		const textDoc = event.document;
 		let minRange : vscode.Range | undefined;
@@ -391,7 +391,7 @@ export function activate(context: ExtensionContext) {
 			}
 		});
 		if (minRange) {
-			client.sendRequest('fstar-vscode-assistant/text-doc-changed', [textDoc.uri.toString(), minRange]);
+			await client.sendRequest('fstar-vscode-assistant/text-doc-changed', [textDoc.uri.toString(), minRange]);
 		}
 	});
 

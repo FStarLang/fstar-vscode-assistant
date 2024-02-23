@@ -95,8 +95,8 @@ export class Server {
 		//  * spawn 2 fstar processes: one for typechecking, one lax process for fly-checking and symbol lookup
 		//  * set event handlers to read the output of the fstar processes
 		//  * send the current document to both processes to start typechecking
-		this.documents.onDidOpen(e => {
-			this.onOpenHandler(e.document);
+		this.documents.onDidOpen(async e => {
+			await this.onOpenHandler(e.document);
 		});
 
 		// Only keep settings for open documents
@@ -144,8 +144,8 @@ export class Server {
 		this.connection.conn.onInitialize(params => this.onInitialize(params));
 		this.connection.conn.onInitialized(() => this.onInitializedHandler());
 		// We don't do anything special when the configuration changes
-		this.connection.conn.onDidChangeConfiguration(_change => {
-			this.updateConfigurationSettings();
+		this.connection.conn.onDidChangeConfiguration(async _change => {
+			await this.updateConfigurationSettings();
 		});
 		this.connection.conn.onDidChangeWatchedFiles(_change => {
 			// Monitored files have change in VSCode
@@ -241,7 +241,7 @@ export class Server {
 	}
 
 	// Send a FullBufferQuery to validate the given document.
-	async validateFStarDocument(textDocument: TextDocument, kind: 'full' | 'lax' | 'cache' | 'reload-deps', withSymbols: boolean, lax?: 'lax') {
+	validateFStarDocument(textDocument: TextDocument, kind: 'full' | 'lax' | 'cache' | 'reload-deps', withSymbols: boolean, lax?: 'lax') {
 		// console.log("ValidateFStarDocument( " + textDocument.uri + ", " + kind + ", lax=" + lax + ")");
 		this.connection.sendClearDiagnostics({ uri: textDocument.uri });
 		if (!lax) {
@@ -260,10 +260,10 @@ export class Server {
 		if (!fstar_conn) { return; }
 
 		const response = fstar_conn.fullBufferRequest(textDocument.getText(), kind, withSymbols);
-		this.handleFullBufferResponse(response, textDocument, lax);
+		this.handleFullBufferResponse(response, textDocument, lax).catch(() => {});
 	}
 
-	async validateFStarDocumentToPosition(textDocument: TextDocument, kind: 'verify-to-position' | 'lax-to-position', position: { line: number, column: number }) {
+	validateFStarDocumentToPosition(textDocument: TextDocument, kind: 'verify-to-position' | 'lax-to-position', position: { line: number, column: number }) {
 		this.pendingChangeEvents = []; // Clear pending change events, since we're checking it now
 		// console.log("ValidateFStarDocumentToPosition( " + textDocument.uri + ", " + kind);
 		this.connection.sendClearDiagnostics({ uri: textDocument.uri });
@@ -289,7 +289,7 @@ export class Server {
 		if (!fstar_conn) { return; }
 
 		const response = fstar_conn.partialBufferRequest(textDocument.getText(), kind, position);
-		this.handleFullBufferResponse(response, textDocument, lax);
+		this.handleFullBufferResponse(response, textDocument, lax).catch(() => {});
 	}
 
 	private async handleFullBufferResponse(promise: StreamedResult<FullBufferQueryResponse>, textDocument: TextDocument, lax?: 'lax') {
@@ -304,12 +304,13 @@ export class Server {
 		// TODO(klinvill): could add a nicer API to consume a streamed result without needing to continuosly check next_promise.
 		while (next_promise) {
 			this.handleSingleFullBufferResponse(response, textDocument, lax);
+			// eslint-disable-next-line @typescript-eslint/no-floating-promises
 			[response, next_promise] = await next_promise;
 		}
 		this.handleSingleFullBufferResponse(response, textDocument, lax);
 	}
 
-	private async handleSingleFullBufferResponse(response: FullBufferQueryResponse, textDocument: TextDocument, lax?: 'lax') {
+	private handleSingleFullBufferResponse(response: FullBufferQueryResponse, textDocument: TextDocument, lax?: 'lax') {
 		if (response.kind === 'message' && response.level === 'progress') {
 			handleIdeProgress(textDocument, response.contents as IdeProgress, lax === 'lax', this);
 		} else if (response.kind === 'message' && response.level === 'info') {
@@ -512,10 +513,10 @@ export class Server {
 
 	// The client (e.g. extension) acknowledged the initialization
 	private async onInitializedHandler() {
-		this.updateConfigurationSettings();
+		await this.updateConfigurationSettings();
 		if (this.hasConfigurationCapability) {
 			// Register for all configuration changes.
-			this.connection.conn.client.register(DidChangeConfigurationNotification.type, undefined);
+			await this.connection.conn.client.register(DidChangeConfigurationNotification.type, undefined);
 			// const settings = connection.workspace.getConfiguration('fstarVSCodeAssistant');
 			// const settings = connection.workspace.getConfiguration();
 			// console.log("Server got settings: " + JSON.stringify(settings));
@@ -565,7 +566,7 @@ export class Server {
 			const fstar_conn = this.getFStarConnection(doc, lax);
 			// TODO(klinvill): should we await the response here? The autocomplete response table is populated asynchronously.
 			const responses = fstar_conn?.autocompleteRequest(wordAndRange.word);
-			responses?.then(rs => handleIdeAutoComplete(doc, rs.response as IdeAutoCompleteOptions, this));
+			responses?.then(rs => handleIdeAutoComplete(doc, rs.response as IdeAutoCompleteOptions, this)).catch(() => {});
 		}
 		const items: CompletionItem[] = [];
 		// TODO(klinvill): maybe replace this with a map() call?
@@ -623,7 +624,7 @@ export class Server {
 		if (symbol && symbol.symbolInfo) {
 			return formatIdeSymbol(symbol.symbolInfo);
 		}
-		this.requestSymbolInfo(textDoc, textDocumentPosition.position, symbol.wordAndRange);
+		this.requestSymbolInfo(textDoc, textDocumentPosition.position, symbol.wordAndRange).catch(() => {});
 		return { contents: { kind: 'plaintext', value: "Looking up:" + symbol.wordAndRange.word } };
 	}
 
@@ -644,7 +645,7 @@ export class Server {
 			const location = LocationLink.create(uri, range, range);
 			return [location];
 		}
-		this.requestSymbolInfo(textDoc, defParams.position, symbol.wordAndRange);
+		this.requestSymbolInfo(textDoc, defParams.position, symbol.wordAndRange).catch(() => {});
 		return [];
 	}
 
@@ -703,10 +704,10 @@ export class Server {
 		}
 	}
 
-	private onRestartRequest(uri: any) {
+	private async onRestartRequest(uri: any) {
 		// console.log("Received restart request with parameters: " + uri);
 		const textDocument = this.getDocument(uri);
-		this.onRestartHandler(textDocument);
+		await this.onRestartHandler(textDocument);
 	}
 
 	private async onRestartHandler(textDocument?: TextDocument) {
@@ -720,7 +721,7 @@ export class Server {
 		}
 	}
 
-	private async onTextDocChangedRequest(params: any) {
+	private onTextDocChangedRequest(params: any) {
 		const uri = params[0];
 		const range: { line: number; character: number }[] = params[1];
 		const textDocument = this.getDocument(uri);
@@ -731,13 +732,13 @@ export class Server {
 		fstar_conn?.cancelRequest(range[0]);
 	}
 
-	private onKillAndRestartSolverRequest(uri: any) {
+	private async onKillAndRestartSolverRequest(uri: any) {
 		const textDocument = this.getDocument(uri);
 		if (!textDocument) { return; }
 		// TODO(klinvill): It looks like this function only restarts the
 		// standard F* solver (not the lax one), is this the desired behavior?
 		const fstar_conn = this.getFStarConnection(textDocument);
-		fstar_conn?.restartSolver();
+		await fstar_conn?.restartSolver();
 	}
 
 	private onKillAllRequest(params: any) {
