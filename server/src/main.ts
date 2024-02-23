@@ -13,6 +13,9 @@ import {
 import { ClientConnection } from './client_connection';
 import { Server } from './server';
 
+// Make unhandled rejections non-fatal
+process.on('unhandledRejection', error => console.log('Unhandled rejection:', error));
+
 // Connection between the LSP server and client (e.g. the extension)
 const connection = new ClientConnection();
 // Simple text document manager.
