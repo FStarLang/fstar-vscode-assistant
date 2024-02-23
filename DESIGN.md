@@ -154,7 +154,7 @@ See https://code.visualstudio.com/api/working-with-extensions/publishing-extensi
 
 Some notes:
 
-1. Run `vsce package <version number>`
+1. Run `npx vsce package <version number>`
    - This will bump the version number in package.json and package-lock.json
    
    - It also tries to a git add once its changed these files, but this
@@ -162,7 +162,7 @@ Some notes:
 
 2. `git add` and `commit` the changes to package.json and package-lock.json
 
-3. Run `vsce package`: This time it should produce a fstar-vscode-assistant-<version>.vsix
+3. Run `npx vsce package`: This time it should produce a fstar-vscode-assistant-<version>.vsix
 
 4. Upload the package to https://marketplace.visualstudio.com/manage/publishers/fstarlang
    (You need credentials to do this. Ask one of the extension developers.)

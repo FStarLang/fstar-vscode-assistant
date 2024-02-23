@@ -144,6 +144,7 @@
 		"test": "cd server && npm test"
 	},
 	"devDependencies": {
+		"@vscode/vsce": "^2.24.0",
 		"@types/node": "^16.11.7",
 		"@types/which": "^3.0.3",
 		"@typescript-eslint/eslint-plugin": "^7.0.2",
