@@ -80,7 +80,7 @@ export class FStarConnection {
 
 		// Wait for a second for processes to die before restarting the solver
 		await setTimeout(1000);
-		this.restartSolverRequest();
+		await this.restartSolverRequest();
 	}
 
 	// Gets the configuration for the F* process.
@@ -126,9 +126,9 @@ export class FStarConnection {
 	}
 
 	// Wrapper for a request that doesn't expect a response.
-	private async silentRequest<T>(query: T) {
+	private silentRequest<T>(query: T) {
 		const expectResponse = false;
-		return this.request(query, expectResponse);
+		this.request(query, expectResponse).catch(() => {});
 	}
 
 	// Wrapper for a request that results in a stream of responses.
@@ -243,7 +243,7 @@ export class FStarConnection {
 	// TODO(klinvill): What exactly does this do? I copied the comment with the
 	// messages interface definition. Should also be documented in
 	// https://github.com/FStarLang/FStar/wiki/Editor-support-for-F*#cancel
-	async cancelRequest(range: { line: number; character: number }) {
+	cancelRequest(range: { line: number; character: number }) {
 		const query: CancelRequest = {
 			query: "cancel",
 			args: {
