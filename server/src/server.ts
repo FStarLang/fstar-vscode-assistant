@@ -292,7 +292,7 @@ export class Server {
 		this.handleFullBufferResponse(response, textDocument, lax).catch(() => {});
 	}
 
-	private async handleFullBufferResponse(promise: StreamedResult<FullBufferQueryResponse>, textDocument: TextDocument, lax?: 'lax') {
+	private async handleFullBufferResponse(promise: Promise<StreamedResult<FullBufferQueryResponse>>, textDocument: TextDocument, lax?: 'lax') {
 		let [response, next_promise] = await promise;
 
 		// full-buffer queries result in a stream of IdeProgress responses.
@@ -301,7 +301,8 @@ export class Server {
 		// therefore handle each of these progress messages here until there is
 		// no longer a next promise.
 		//
-		// TODO(klinvill): could add a nicer API to consume a streamed result without needing to continuosly check next_promise.
+		// TODO(klinvill): could add a nicer API to consume a streamed result
+		// without needing to continuously check next_promise.
 		while (next_promise) {
 			this.handleSingleFullBufferResponse(response, textDocument, lax);
 			// eslint-disable-next-line @typescript-eslint/no-floating-promises
@@ -332,10 +333,6 @@ export class Server {
 			} else if (Array.isArray(response.response)) {
 				handleIdeDiagnostics(textDocument, response.response as IdeError[], lax === 'lax', this);
 			} else {
-				// TODO(klinvill): can symbol messages be sent in response
-				// to a request that results in streams (like full-buffer
-				// queries)? I seem to be seeing this for some full-buffer
-				// queries.
 				handleIdeSymbol(textDocument, response.response as IdeSymbol, this);
 			}
 		} else {

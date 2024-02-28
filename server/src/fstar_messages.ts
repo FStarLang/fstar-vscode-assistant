@@ -165,7 +165,7 @@ export interface IdeVfsAddResponse extends IdeQueryResponse {
 	response: null;
 }
 
-export type IdeResponse = ProtocolInfo | IdeProgressResponse | IdeStatusResponse | IdeProofStateResponse | IdeSymbolResponse | IdeDiagnosticsResponse | IdeInterruptedResponse | IdeAutoCompleteResponse;
+export type IdeResponse = IdeProgressResponse | IdeStatusResponse | IdeProofStateResponse | IdeSymbolResponse | IdeDiagnosticsResponse | IdeInterruptedResponse | IdeAutoCompleteResponse;
 
 // Most queries seem to have only one kind of expected response, but full-buffer
 // queries can respond with a large variety of messages.

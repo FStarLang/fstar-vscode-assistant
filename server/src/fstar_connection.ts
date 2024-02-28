@@ -9,7 +9,7 @@ import {
 import { setTimeout } from 'timers/promises';
 
 import { FStar, FStarConfig } from './fstar';
-import { isProtocolInfo, ProtocolInfo, FullBufferQuery, FStarRange, LookupQuery, VfsAdd, AutocompleteRequest, CancelRequest, FullBufferQueryResponse, IdeSymbolResponse, IdeAutoCompleteResponse, IdeQueryResponse, IdeQueryMessage, IdeProgressResponse, IdeVfsAddResponse} from './fstar_messages';
+import { isProtocolInfo, ProtocolInfo, FullBufferQuery, FStarRange, LookupQuery, VfsAdd, AutocompleteRequest, CancelRequest, FullBufferQueryResponse, IdeSymbolResponse, IdeAutoCompleteResponse, IdeProgressResponse, IdeVfsAddResponse, IdeResponse} from './fstar_messages';
 
 // For full-buffer queries, F* chunks the buffer into fragments and responds
 // with several messages, one for each fragment until the first failing
@@ -17,7 +17,7 @@ import { isProtocolInfo, ProtocolInfo, FullBufferQuery, FStarRange, LookupQuery,
 // behavior allows for displaying incremental progress while the rest of the
 // buffer is being checked. `StreamedResult` is the type of these partially
 // completed queries.
-export type StreamedResult<T> = Promise<[T, StreamedResult<T> | undefined]>;
+export type StreamedResult<T> = [T, Promise<StreamedResult<T>> | undefined];
 
 export class FStarConnection {
 	private last_query_id: number;
@@ -26,7 +26,7 @@ export class FStarConnection {
 	//
 	// Maps query-ids to promises that will be resolved with the appropriate
 	// response.
-	private pending_responses: Map<number, {resolve: (v: any) => void, reject: (e: any) => void, is_stream: boolean}>;
+	private pending_responses: Map<number, {resolve: (v: IdeResponse | StreamedResult<IdeResponse>) => void, reject: (e: Error) => void, is_stream: boolean}>;
 	private fstar: FStar;
 
 	constructor(fstar: FStar, public debug: boolean) {
@@ -132,7 +132,7 @@ export class FStarConnection {
 	}
 
 	// Wrapper for a request that results in a stream of responses.
-	private async streamRequest<T, R>(query: T) : StreamedResult<R> {
+	private async streamRequest<T, R>(query: T) : Promise<StreamedResult<R>> {
 		const expectResponse = true;
 		const is_stream = true;
 		return this.request(query, expectResponse, is_stream);
@@ -143,7 +143,7 @@ export class FStarConnection {
 	// progress messages, proof-state messages, and status messages. Due to this
 	// variety of responses, the full response is returned wrapped within a
 	// `StreamedResult` object.
-	private async fullBufferQuery(query: FullBufferQuery): StreamedResult<FullBufferQueryResponse> {
+	private async fullBufferQuery(query: FullBufferQuery): Promise<StreamedResult<FullBufferQueryResponse>> {
 		if (!this.fstar.supportsFullBuffer) {
 			throw new Error("ERROR: F* process does not support full-buffer queries");
 		}
@@ -151,7 +151,7 @@ export class FStarConnection {
 	}
 
 	// Send a request to F* to check the given code.
-	async fullBufferRequest(code: string, kind: 'full' | 'lax' | 'cache' | 'reload-deps', withSymbols: boolean): StreamedResult<FullBufferQueryResponse> {
+	async fullBufferRequest(code: string, kind: 'full' | 'lax' | 'cache' | 'reload-deps', withSymbols: boolean): Promise<StreamedResult<FullBufferQueryResponse>> {
 		return this.fullBufferQuery({
 			query: "full-buffer",
 			args: {
@@ -169,7 +169,7 @@ export class FStarConnection {
 	// TODO(klinvill): Since this FStarConnection object is only for one F*
 	// process (lax or not), do we need the `kind` argument here or can we infer
 	// it from the F* process?
-	async partialBufferRequest(code: string, kind: 'verify-to-position' | 'lax-to-position', position: { line: number, column: number }): StreamedResult<FullBufferQueryResponse> {
+	async partialBufferRequest(code: string, kind: 'verify-to-position' | 'lax-to-position', position: { line: number, column: number }): Promise<StreamedResult<FullBufferQueryResponse>> {
 		return this.fullBufferQuery({
 			query: "full-buffer",
 			args: {
@@ -240,9 +240,13 @@ export class FStarConnection {
 	// given range, to stop it from verifying the part of the buffer that has
 	// changed
 	//
-	// TODO(klinvill): What exactly does this do? I copied the comment with the
-	// messages interface definition. Should also be documented in
+	// TODO(klinvill): Should also be documented in
 	// https://github.com/FStarLang/FStar/wiki/Editor-support-for-F*#cancel
+	//
+	// TODO(klinvill): Should sending a cancel message prevent any other message
+	// from being sent? For an explanation of how full buffer requests interact
+	// with cancellation see:
+	// https://github.com/FStarLang/fstar-vscode-assistant/pull/31#issuecomment-1915513926
 	cancelRequest(range: { line: number; character: number }) {
 		const query: CancelRequest = {
 			query: "cancel",
@@ -251,9 +255,6 @@ export class FStarConnection {
 				"cancel-column": range.character
 			}
 		};
-
-		// TODO(klinvill): I believe there's no responses to cancel requests, is
-		// that correct?
 		this.silentRequest(query);
 	}
 
@@ -276,7 +277,7 @@ export class FStarConnection {
 		} else {
 			// Either we expect unprompted protocol-info messages, or we expect
 			// responses to a query we sent.
-			const r = msg as IdeQueryResponse | IdeQueryMessage;
+			const r = msg as IdeResponse;
 			// Note: responses to full-buffer queries are sent with query ids
 			// with non-strictly incrementing fractional components. E.g. if the
 			// query id is 2, the responses can come back with query ids 2, 2.1,
@@ -297,7 +298,7 @@ export class FStarConnection {
 			// We fulfill all promises with the full responses. Each consumer of
 			// the promise is then responsible for parsing the response.
 			if (pr.is_stream) {
-				// TODO(klinvill): Is there any other way to end a stream than with a full-buffer-finished message?
+				// A stream is assumed to always ends with a full-buffer-finished message
 				const done = r.kind === 'message' && r.level === 'progress' && ((r as IdeProgressResponse).contents).stage === 'full-buffer-finished';
 
 				this.respondStream(qid, r, done);
@@ -310,7 +311,7 @@ export class FStarConnection {
 	// Handles an expected response by fulfilling the promise for the specified
 	// query and removing it from the list of pending responses. The promise is
 	// resolved with the response.
-	private respond(qid: number, response: object) {
+	private respond(qid: number, response: IdeResponse | StreamedResult<IdeResponse>) {
 		const pr = this.pending_responses.get(qid);
 		if (!pr) {
 			console.warn(`No inflight query found for query-id: ${qid}, got response: ${JSON.stringify(response)}.`);
@@ -326,7 +327,7 @@ export class FStarConnection {
 	// response in the stream, the second element in the StreamedResult will be
 	// undefined. Otherwise, the second element in the StreamedResult is a
 	// promise that will be resolved with the next response in the stream.
-	private respondStream(qid: number, response: object, done: boolean) {
+	private respondStream(qid: number, response: IdeResponse, done: boolean) {
 		if (done) {
 			this.respond(qid, [response, undefined]);
 		} else {
@@ -342,7 +343,7 @@ export class FStarConnection {
 			const new_promise = new Promise((resolve, reject) => {
 				this.pending_responses.set(qid, {resolve, reject, is_stream: true});
 			});
-			pr.resolve([response, new_promise]);
+			pr.resolve([response, new_promise] as StreamedResult<IdeResponse>);
 		}
 	}
 
