@@ -11,12 +11,12 @@ import * as fs from 'fs';
 import * as util from 'util';
 
 import { Server } from './server';
-import { FStarRange, IdeProofState, IdeProofStateContextualGoal, IdeSymbol } from './fstar_messages';
+import { FStarPosition, FStarRange, IdeProofState, IdeProofStateContextualGoal, IdeSymbol } from './fstar_messages';
 
 ////////////////////////////////////////////////////////////////////////////////////
 // Range utilities
 ////////////////////////////////////////////////////////////////////////////////////
-export function mkPosition(pos: number[]): Position {
+export function mkPosition(pos: FStarPosition): Position {
 	//F* line numbers begin at 1; unskew
 	return Position.create(pos[0] > 0 ? pos[0] - 1 : pos[0], pos[1]);
 }
@@ -25,11 +25,15 @@ export function fstarRangeAsRange(rng: FStarRange): Range {
 	return Range.create(mkPosition(rng.beg), mkPosition(rng.end));
 }
 
+export function posAsFStarPos(pos: Position): FStarPosition {
+	return [pos.line + 1, pos.character];
+}
+
 export function rangeAsFStarRange(rng: Range): FStarRange {
 	return {
 		fname: "<input>",
-		beg: [rng.start.line + 1, rng.start.character],
-		end: [rng.end.line + 1, rng.end.character]
+		beg: posAsFStarPos(rng.start),
+		end: posAsFStarPos(rng.end),
 	};
 }
 
@@ -140,14 +144,4 @@ export function formatIdeProofState(ps: IdeProofState): string {
 		result += formatContextualGoalArray(ps["smt-goals"]);
 	}
 	return result;
-}
-
-// Print a single symbol entry to show in a hover message
-export function formatIdeSymbol(symbol: IdeSymbol): Hover {
-	return {
-		contents: {
-			kind: 'markdown',
-			value: "```fstar\n" + symbol.name + ":\n" + symbol.type + "\n```\n"
-		}
-	};
 }
