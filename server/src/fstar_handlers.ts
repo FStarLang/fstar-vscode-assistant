@@ -21,16 +21,6 @@ import { mkPosition, fstarRangeAsRange, qualifyFilename } from './utils';
 // Handling responses from the F* IDE protocol
 ///////////////////////////////////////////////////////////////////////////////////
 
-// If we get a response to a symbol query, we store it in the symbol table map
-export function handleIdeSymbol(textDocument: TextDocument, response: IdeSymbol, server: Server) {
-	// console.log("Got ide symbol " +JSON.stringify(response));
-	const rng = JSON.stringify(response["symbol-range"]);
-	const hoverSymbolMap = server.getDocumentState(textDocument.uri)?.hover_symbol_info;
-	if (hoverSymbolMap) {
-		hoverSymbolMap.set(rng, response);
-	}
-}
-
 // If we get a proof state dump message, we store it in the proof state map
 export function handleIdeProofState(textDocument: TextDocument, response: IdeProofState, server: Server) {
 	// console.log("Got ide proof state " + JSON.stringify(response));
@@ -218,20 +208,4 @@ export function handleIdeDiagnostics(textDocument: TextDocument, response: IdeEr
 	else {
 		docState.fstar_diagnostics = docState.fstar_diagnostics.concat(diagnostics);
 	}
-}
-
-export function handleIdeAutoComplete(textDocument: TextDocument, response: IdeAutoCompleteOptions, server: Server) {
-	if (!response || !(Array.isArray(response))) { return; }
-	const doc_state = server.getDocumentState(textDocument.uri);
-	if (!doc_state) { return; }
-	let searchTerm = undefined;
-	response.forEach((resp) => {
-		const annot = resp[1];
-		if (annot == "<search term>") {
-			searchTerm = resp[2];
-		}
-	});
-	if (!searchTerm) { return; }
-	doc_state.auto_complete_info.set(searchTerm, response);
-	return;
 }

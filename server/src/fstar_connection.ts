@@ -187,7 +187,7 @@ export class FStarConnection {
 	//
 	// For more details, see:
 	// https://github.com/FStarLang/FStar/wiki/Editor-support-for-F*#lookup
-	async lookupQuery(filePath: string, position: Position, word: string, range: FStarRange): Promise<IdeSymbolResponse> {
+	async lookupQuery(filePath: string, position: Position, word: string): Promise<IdeSymbolResponse> {
 		const query: LookupQuery = {
 			query: "lookup",
 			args: {
@@ -199,7 +199,6 @@ export class FStarConnection {
 					line: position.line + 1,
 					column: position.character
 				},
-				"symbol-range": range
 			}
 		};
 		return this.request(query);

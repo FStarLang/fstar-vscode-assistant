@@ -16,15 +16,16 @@ export function isProtocolInfo(object: any): boolean {
 		&& object.kind && object.kind === 'protocol-info';
 }
 
-// An FStarRange is a range of positions in some source file
 // A position is a line number and a column number
-// A quirk is that the line number is 1-based, but the column number is 0-based
-// In contrast, the LSP protocol uses 0-based line and column numbers
-// So, we need to convert between the two
+// F*'s line number is 1-based, but the column number is 0-based
+// (In contrast, the LSP protocol uses 0-based line and column numbers)
+export type FStarPosition = [line: number, column: number]
+
+// An FStarRange is a range of positions in some source file
 export interface FStarRange {
 	fname: string;
-	beg: number[];
-	end: number[]
+	beg: FStarPosition;
+	end: FStarPosition;
 }
 
 // IdeSymbol: This message is sent from fstar.exe in response to a
@@ -36,7 +37,7 @@ export interface IdeSymbol {
 	documentation: string;
 	definition: string;
 	"defined-at": FStarRange;
-	"symbol-range": FStarRange;
+	"symbol-range"?: FStarRange;
 	symbol: string;
 }
 
@@ -99,7 +100,7 @@ export interface IdeProgress {
 
 
 // An auto-complete response
-export type IdeAutoCompleteOption = [number, string, string];
+export type IdeAutoCompleteOption = [matchLength: number, annotation: string, candidate: string];
 export type IdeAutoCompleteOptions = IdeAutoCompleteOption[];
 
 // Replies from F* either take the form of response messages or status messages.
@@ -237,7 +238,7 @@ export interface LookupQuery {
 		// fstar.exe echoes this back when it responds
 		// and we use this to lookup the symbol table when
 		// the user hovers or requests the definition of that word
-		"symbol-range": FStarRange
+		"symbol-range"?: FStarRange
 	}
 }
 

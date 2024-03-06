@@ -30,12 +30,12 @@ import {
 import * as cp from 'child_process';
 
 import { defaultSettings, fstarVSCodeAssistantSettings } from './settings';
-import { formatIdeProofState, formatIdeSymbol, fstarRangeAsRange, mkPosition, qualifyFilename, rangeAsFStarRange } from './utils';
+import { formatIdeProofState, fstarRangeAsRange, mkPosition, qualifyFilename, rangeAsFStarRange } from './utils';
 import { ClientConnection } from './client_connection';
 import { FStarConnection, StreamedResult } from './fstar_connection';
 import { FStar } from './fstar';
 import { FStarRange, IdeAutoCompleteOptions, IdeSymbol, IdeProofState, IdeProgress, IdeError, FullBufferQueryResponse } from './fstar_messages';
-import { handleIdeAutoComplete, handleIdeDiagnostics, handleIdeProgress, handleIdeProofState, handleIdeSymbol } from './fstar_handlers';
+import { handleIdeDiagnostics, handleIdeProgress, handleIdeProofState } from './fstar_handlers';
 
 // LSP Server
 //
@@ -208,18 +208,6 @@ export class Server {
 		return { word: word, range: rangeAsFStarRange(range) };
 	}
 
-	// Lookup the symbol table for the symbol under the cursor
-	findIdeSymbolAtPosition(textDocument: TextDocument, position: Position) {
-		const uri = textDocument.uri;
-		const doc_state = this.getDocumentState(uri);
-		if (!doc_state) { return; }
-		const wordAndRange = this.findWordAtPosition(textDocument, position);
-		const range = wordAndRange.range;
-		const rangeKey = JSON.stringify(range);
-		const result = doc_state.hover_symbol_info.get(rangeKey);
-		return { symbolInfo: result, wordAndRange: wordAndRange };
-	}
-
 	// Lookup the proof state table for the line at the cursor
 	findIdeProofStateAtLine(textDocument: TextDocument, position: Position) {
 		const uri = textDocument.uri;
@@ -333,44 +321,11 @@ export class Server {
 			} else if (Array.isArray(response.response)) {
 				handleIdeDiagnostics(textDocument, response.response as IdeError[], lax === 'lax', this);
 			} else {
-				handleIdeSymbol(textDocument, response.response as IdeSymbol, this);
+				// ignore
 			}
 		} else {
 			console.warn(`Unhandled full-buffer response: ${JSON.stringify(response)}`);
 		}
-	}
-
-	// Sending a LookupQuery to fstar_lax_ide, if flycheck is enabled
-	// otherwise send lookup queries to fstar_ide
-	async requestSymbolInfo(textDocument: TextDocument, position: Position, wordAndRange: WordAndRange) {
-		const uri = textDocument.uri;
-		const filePath = URI.parse(uri).fsPath;
-		const lax = this.configurationSettings.flyCheck ? 'lax' : undefined;
-		const fstar_conn = this.getFStarConnection(textDocument, lax);
-		if (!fstar_conn) { return; }
-		const result = await fstar_conn.lookupQuery(filePath, position, wordAndRange.word, wordAndRange.range);
-		handleIdeSymbol(textDocument, result.response as IdeSymbol, this);
-	}
-
-
-	// Lookup any auto-complete information for the symbol under the cursor
-	findIdeAutoCompleteAtPosition(textDocument: TextDocument, position: Position) {
-		const uri = textDocument.uri;
-		const doc_state = this.getDocumentState(uri);
-		if (!doc_state) { return; }
-		const wordAndRange = this.findWordAtPosition(textDocument, position);
-		const auto_completions = [];
-		if (wordAndRange.word.length > 3) {
-			for (const [key, value] of doc_state.auto_complete_info) {
-				if (wordAndRange.word.startsWith(key)) {
-					auto_completions.push({ key, value });
-				}
-			}
-		}
-		return {
-			auto_completions,
-			wordAndRange
-		};
 	}
 
 	closeFStarProcessesForDocument(textDocument: TextDocument) {
@@ -445,9 +400,7 @@ export class Server {
 			alerted_fstar_lax_process_exited: false,
 			fstar_lax_diagnostics: [],
 			last_query_id: 0,
-			hover_symbol_info: new Map(),
 			hover_proofstate_info: new Map(),
-			auto_complete_info: new Map(),
 			prefix_stale: false,
 		});
 
@@ -529,54 +482,25 @@ export class Server {
 		}
 	}
 
-	// The document state holds a table of completions for words in the document
-	// This table is populated lazily by autocomplete calls to fstar_lax_ide
-	// We look in the table for a best match for the current word at the cursor
-	// If we find a match, we return it
-	// If the best match is not a perfect match (i.e., it doesn't match the word
-	// at the cursor exactly), we send we send a request to fstar_lax_ide
-	// for the current word, for use at subsequent completion calls
-	private onCompletion(textDocumentPosition: TextDocumentPositionParams): CompletionItem[] {
+	private async onCompletion(textDocumentPosition: TextDocumentPositionParams): Promise<CompletionItem[] | undefined> {
 		const doc = this.getDocument(textDocumentPosition.textDocument.uri);
-		if (!doc) { return []; }
-		// move the cursor back one character to get the word before the cursor
-		const position = Position.create(
-			textDocumentPosition.position.line,
-			textDocumentPosition.position.character - 1);
-		const autoCompleteResponses = this.findIdeAutoCompleteAtPosition(doc, position);
-		if (!autoCompleteResponses) {
-			return [];
-		}
-		let shouldSendRequest = false;
-		let bestMatch: { key: string; value: IdeAutoCompleteOptions } = { key: "", value: [] };
-		autoCompleteResponses.auto_completions.forEach((response) => {
-			if (response.key.length > bestMatch.key.length) {
-				bestMatch = response;
-			}
-		});
-		shouldSendRequest = bestMatch.key != autoCompleteResponses.wordAndRange.word;
-		if (shouldSendRequest) {
-			const wordAndRange = autoCompleteResponses.wordAndRange;
-			// Don't send requests for very short words
-			if (wordAndRange.word.length < 2) return [];
-			const lax = this.configurationSettings.flyCheck ? "lax" : undefined;
-			const fstar_conn = this.getFStarConnection(doc, lax);
-			// TODO(klinvill): should we await the response here? The autocomplete response table is populated asynchronously.
-			const responses = fstar_conn?.autocompleteRequest(wordAndRange.word);
-			responses?.then(rs => handleIdeAutoComplete(doc, rs.response as IdeAutoCompleteOptions, this)).catch(() => {});
-		}
+		if (!doc) return;
+		const lax = this.configurationSettings.flyCheck ? 'lax' : undefined;
+		const conn = this.getFStarConnection(doc, lax);
+		if (!conn) return;
+		const word = this.findWordAtPosition(doc, textDocumentPosition.position);
+		if (word.word.length < 2) return;
+		const response = await conn.autocompleteRequest(word.word);
+		if (response.status !== 'success') return;
 		const items: CompletionItem[] = [];
-		// TODO(klinvill): maybe replace this with a map() call?
-		bestMatch.value.forEach((response) => {
-			const data = response;
+		response.response.forEach(([matchLength, annotation, candidate]) => {
 			// vscode replaces the word at the cursor with the completion item
 			// but its notion of word is the suffix of the identifier after the last dot
 			// so the completion we provide is the suffix of the identifier after the last dot
-			const label = response[2].lastIndexOf('.') > 0 ? response[2].substring(response[2].lastIndexOf('.') + 1) : response[2];
+			const label = candidate.lastIndexOf('.') > 0 ? candidate.substring(candidate.lastIndexOf('.') + 1) : candidate;
 			const item: CompletionItem = {
 				label: label,
 				kind: CompletionItemKind.Method,
-				data: data
 			};
 			items.push(item);
 		});
@@ -584,27 +508,9 @@ export class Server {
 	}
 
 	// The onHover handler is called when the user hovers over a symbol
-	// The interface requires us to return a Hover object *synchronously*
-	// However, our communication with fstar.exe is asynchronous
-	// So we ask F* to resolve the symbol asynchronously, and return a dummy Hover
-	// object at first.
-	// When F* responds, the symbol table map gets populated
-	// Then, if we get a hover request for the same symbol, we can return the
-	// actual Hover object.
-	// Sometimes, the symbol table map gets populated before the hover request,
-	// notably in the case where we have tactic proof state information to display
-	// for that line. In that case, we just return the Hover object immediately.
-	//
-	// Note: There are some problems with this, because as the document changes,
-	// we should invalidate the symbol table map. But we don't do that yet.
-	// I plan to adjust the F* IDE protocol so that it can send us a symbol table
-	// map for every declaration that the lax F* process sees. We can use that table
-	// to resolve symbols, but even that is problematic because the lax F* also caches
-	// the AST of the document rather than the raw textual positions. So we'll have to
-	// do some work to make this work well.
-	private onHover(textDocumentPosition: TextDocumentPositionParams): Hover {
+	private async onHover(textDocumentPosition: TextDocumentPositionParams): Promise<Hover | undefined> {
 		const textDoc = this.getDocument(textDocumentPosition.textDocument.uri);
-		if (!textDoc) { return { contents: "" }; }
+		if (!textDoc) return;
 		// First, check if we have proof state information for this line
 		const proofState = this.findIdeProofStateAtLine(textDoc, textDocumentPosition.position);
 		if (proofState) {
@@ -615,35 +521,46 @@ export class Server {
 				}
 			};
 		}
-		// Otherwise, check if we have symbol information for this symbol
-		const symbol = this.findIdeSymbolAtPosition(textDoc, textDocumentPosition.position);
-		if (!symbol) { return { contents: "No symbol info" }; }
-		if (symbol && symbol.symbolInfo) {
-			return formatIdeSymbol(symbol.symbolInfo);
-		}
-		this.requestSymbolInfo(textDoc, textDocumentPosition.position, symbol.wordAndRange).catch(() => {});
-		return { contents: { kind: 'plaintext', value: "Looking up:" + symbol.wordAndRange.word } };
+		// Otherwise, check the symbol information for this symbol
+		const lax = this.configurationSettings.flyCheck ? 'lax' : undefined;
+		const conn = this.getFStarConnection(textDoc, lax);
+		if (!conn) return;
+		const filePath = URI.parse(textDoc.uri).fsPath;
+		const word = this.findWordAtPosition(textDoc, textDocumentPosition.position);
+		const result = await conn.lookupQuery(filePath, textDocumentPosition.position, word.word);
+		if (result.status !== 'success') return;
+		return {
+			contents: {
+				kind: 'markdown',
+				value:
+					"```fstar\n" +
+					result.response.name + ":\n" +
+					result.response.type + "\n" +
+					"```\n"
+			},
+		};
 	}
 
 	// The onDefinition handler is called when the user clicks on a symbol
 	// It's very similar to the onHover handler, except that it returns a
 	// LocationLink object instead of a Hover object
-	private onDefinition(defParams: DefinitionParams): LocationLink[] {
+	private async onDefinition(defParams: DefinitionParams): Promise<LocationLink[]> {
 		const textDoc = this.getDocument(defParams.textDocument.uri);
 		if (!textDoc) { return []; }
-		const symbol = this.findIdeSymbolAtPosition(textDoc, defParams.position);
-		if (!symbol) { return []; }
-		if (symbol && symbol.symbolInfo) {
-			const sym = symbol.symbolInfo;
-			const defined_at = sym["defined-at"];
-			if (!defined_at) { return []; }
-			const range = fstarRangeAsRange(defined_at);
-			const uri = qualifyFilename(defined_at.fname, textDoc.uri, this);
-			const location = LocationLink.create(uri, range, range);
-			return [location];
-		}
-		this.requestSymbolInfo(textDoc, defParams.position, symbol.wordAndRange).catch(() => {});
-		return [];
+		const lax = this.configurationSettings.flyCheck ? 'lax' : undefined;
+		const conn = this.getFStarConnection(textDoc, lax);
+		if (!conn) return [];
+		const filePath = URI.parse(textDoc.uri).fsPath;
+		const word = this.findWordAtPosition(textDoc, defParams.position);
+		const result = await conn.lookupQuery(filePath, defParams.position, word.word);
+		if (result.status !== 'success') return [];
+		const defined_at = result.response["defined-at"];
+		const range = fstarRangeAsRange(defined_at);
+		return [{
+			targetUri: qualifyFilename(defined_at.fname, textDoc.uri, this),
+			targetRange: range,
+			targetSelectionRange: range,
+		}];
 	}
 
 	private async onDocumentRangeFormatting(formatParams: DocumentRangeFormattingParams) {
@@ -766,12 +683,8 @@ interface DocumentState {
 
 	// Every query sent to fstar_ide & fstar_lax_ide is assigned a unique id
 	last_query_id: number;
-	// A symbol-info table populated by fstar_lax_ide for onHover and onDefinition requests
-	hover_symbol_info: Map<string, IdeSymbol>;
 	// A proof-state table populated by fstar_ide when running tactics, displayed in onHover
 	hover_proofstate_info: Map<number, IdeProofState>;
-	// A table of auto-complete responses
-	auto_complete_info: Map<string, IdeAutoCompleteOptions>;
 	// A flag to indicate if the prefix of the buffer is stale
 	prefix_stale: boolean;
 }
