@@ -1,0 +1,40 @@
+name: build
+
+on:
+  pull_request:
+    branches:
+    - '*'
+  push:
+    branches:
+      - '*'
+    tags:
+      - '*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Compile
+        run: npm run compile
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Server unit tests
+        run: npm run test
+
+      - name: Package
+        run: npx vsce package
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          path: '*.vsix'
+          if-no-files-found: error
