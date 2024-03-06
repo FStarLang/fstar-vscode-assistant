@@ -31,9 +31,11 @@ import * as cp from 'child_process';
 
 import { defaultSettings, fstarVSCodeAssistantSettings } from './settings';
 import { formatIdeProofState, formatIdeSymbol, fstarRangeAsRange, mkPosition, qualifyFilename, rangeAsFStarRange } from './utils';
-import { AlertMessage, ClientConnection } from './client_connection';
+import { ClientConnection } from './client_connection';
+import { FStarConnection, StreamedResult } from './fstar_connection';
 import { FStar } from './fstar';
-import { handleFStarResponseForDocumentFactory } from './fstar_handlers';
+import { FStarRange, IdeAutoCompleteOptions, IdeSymbol, IdeProofState, IdeProgress, IdeError, FullBufferQueryResponse } from './fstar_messages';
+import { handleIdeAutoComplete, handleIdeDiagnostics, handleIdeProgress, handleIdeProofState, handleIdeSymbol } from './fstar_handlers';
 
 // LSP Server
 //
@@ -93,13 +95,13 @@ export class Server {
 		//  * spawn 2 fstar processes: one for typechecking, one lax process for fly-checking and symbol lookup
 		//  * set event handlers to read the output of the fstar processes
 		//  * send the current document to both processes to start typechecking
-		this.documents.onDidOpen(e => {
-			this.onOpenHandler(e.document);
+		this.documents.onDidOpen(async e => {
+			await this.onOpenHandler(e.document);
 		});
 
 		// Only keep settings for open documents
 		this.documents.onDidClose(e => {
-			this.killFStarProcessesForDocument(e.document);
+			this.closeFStarProcessesForDocument(e.document);
 			// Clear all diagnostics for a document when it is closed
 			this.connection.sendDiagnostics({
 				uri: e.document.uri,
@@ -142,8 +144,8 @@ export class Server {
 		this.connection.conn.onInitialize(params => this.onInitialize(params));
 		this.connection.conn.onInitialized(() => this.onInitializedHandler());
 		// We don't do anything special when the configuration changes
-		this.connection.conn.onDidChangeConfiguration(_change => {
-			this.updateConfigurationSettings();
+		this.connection.conn.onDidChangeConfiguration(async _change => {
+			await this.updateConfigurationSettings();
 		});
 		this.connection.conn.onDidChangeWatchedFiles(_change => {
 			// Monitored files have change in VSCode
@@ -238,63 +240,7 @@ export class Server {
 		}
 	}
 
-	// Some utilities to send messages to fstar_ide or fstar_lax_ide
-	// Sending a request to either fstar_ide or fstar_lax_ide
-	// Wraps the request with a fresh query-id
-	sendRequestForDocument(textDocument: TextDocument, msg: any, lax?: 'lax') {
-		const doc_state = this.getDocumentState(textDocument.uri);
-		if (!doc_state) {
-			return;
-		}
-		const fstar = this.getFStar(textDocument, lax);
-		if (!fstar) {
-			return;
-		}
-		else {
-			const qid = doc_state.last_query_id;
-			doc_state.last_query_id = qid + 1;
-			msg["query-id"] = '' + (qid + 1);
-			const text = JSON.stringify(msg);
-			if (this.configurationSettings.debug) {
-				console.log(">>> " + text);
-			}
-			if (fstar.proc.exitCode != null) {
-				if (lax) {
-					if (doc_state.alerted_fstar_lax_process_exited) { return; }
-					doc_state.alerted_fstar_lax_process_exited = true;
-					const msg: AlertMessage = {
-						uri: textDocument.uri,
-						message: "ERROR: F* flycheck process exited with code " + fstar.proc.exitCode
-					};
-					this.connection.sendAlert(msg);
-					console.error(msg);
-				}
-				else {
-					if (doc_state.alerted_fstar_process_exited) { return; }
-					doc_state.alerted_fstar_process_exited = true;
-					const msg: AlertMessage = {
-						uri: textDocument.uri,
-						message: "ERROR: F* checker process exited with code " + fstar.proc.exitCode
-					};
-					this.connection.sendAlert(msg);
-					console.error(msg);
-				}
-				return;
-			}
-			else {
-				try {
-					fstar.proc?.stdin?.write(text);
-					fstar.proc?.stdin?.write("\n");
-				} catch (e) {
-					const msg = "ERROR: Error writing to F* process: " + e;
-					console.error(msg);
-					this.connection.sendAlert({ uri: textDocument.uri, message: msg });
-				}
-			}
-		}
-	}
-
-	// Sending a FullBufferQuery to fstar_ide or fstar_lax_ide
+	// Send a FullBufferQuery to validate the given document.
 	validateFStarDocument(textDocument: TextDocument, kind: 'full' | 'lax' | 'cache' | 'reload-deps', withSymbols: boolean, lax?: 'lax') {
 		// console.log("ValidateFStarDocument( " + textDocument.uri + ", " + kind + ", lax=" + lax + ")");
 		this.connection.sendClearDiagnostics({ uri: textDocument.uri });
@@ -310,20 +256,11 @@ export class Server {
 			const ranges = [Range.create(mkPosition([0, 0]), mkPosition([textDocument.lineCount, 0]))];
 			if (kind == "full") { this.connection.sendStatusStarted({ uri: textDocument.uri, ranges: ranges }); }
 		}
-		const fstar = this.getFStar(textDocument, lax);
-		if (fstar?.supportsFullBuffer) {
-			const push_context: FullBufferQuery = {
-				query: "full-buffer",
-				args: {
-					kind,
-					"with-symbols": withSymbols,
-					code: textDocument.getText(),
-					line: 0,
-					column: 0
-				}
-			};
-			this.sendRequestForDocument(textDocument, push_context, lax);
-		}
+		const fstar_conn = this.getFStarConnection(textDocument, lax);
+		if (!fstar_conn) { return; }
+
+		const response = fstar_conn.fullBufferRequest(textDocument.getText(), kind, withSymbols);
+		this.handleFullBufferResponse(response, textDocument, lax).catch(() => {});
 	}
 
 	validateFStarDocumentToPosition(textDocument: TextDocument, kind: 'verify-to-position' | 'lax-to-position', position: { line: number, column: number }) {
@@ -333,6 +270,12 @@ export class Server {
 		// If this is non-lax requests, send a status clear messages to VSCode
 		// to clear the gutter icons and error squiggles
 		// They will be reported again if the document is not verified
+		//
+		// TODO(klinvill): in `validateFStarDocument` this is done only for
+		// non-lax requests. Should a similar check be done here? The previous
+		// implementation of `validateFStarDocumentToPosition` implies that this
+		// function will never be called for lax requests. Is that true?
+		const lax = undefined;
 		const doc_state = this.getDocumentState(textDocument.uri);
 		if (doc_state) {
 			doc_state.prefix_stale = false;
@@ -340,43 +283,73 @@ export class Server {
 		this.connection.sendStatusClear({ uri: textDocument.uri });
 		const ranges = [Range.create(mkPosition([0, 0]), mkPosition([position.line, 0]))];
 		this.connection.sendStatusStarted({ uri: textDocument.uri, ranges: ranges });
-		const fstar = this.getFStar(textDocument);
-		if (fstar && fstar.supportsFullBuffer) {
-			const push_context: FullBufferQuery = {
-				query: "full-buffer",
-				args: {
-					kind: kind,
-					"with-symbols": false,
-					code: textDocument.getText(),
-					line: 0,
-					column: 0,
-					"to-position": position
-				}
-			};
-			this.sendRequestForDocument(textDocument, push_context);
+
+
+		const fstar_conn = this.getFStarConnection(textDocument, lax);
+		if (!fstar_conn) { return; }
+
+		const response = fstar_conn.partialBufferRequest(textDocument.getText(), kind, position);
+		this.handleFullBufferResponse(response, textDocument, lax).catch(() => {});
+	}
+
+	private async handleFullBufferResponse(promise: Promise<StreamedResult<FullBufferQueryResponse>>, textDocument: TextDocument, lax?: 'lax') {
+		let [response, next_promise] = await promise;
+
+		// full-buffer queries result in a stream of IdeProgress responses.
+		// These are returned as `StreamedResult` values which are essentially
+		// tuples with the next promise as the second element of the tuple. We
+		// therefore handle each of these progress messages here until there is
+		// no longer a next promise.
+		//
+		// TODO(klinvill): could add a nicer API to consume a streamed result
+		// without needing to continuously check next_promise.
+		while (next_promise) {
+			this.handleSingleFullBufferResponse(response, textDocument, lax);
+			// eslint-disable-next-line @typescript-eslint/no-floating-promises
+			[response, next_promise] = await next_promise;
+		}
+		this.handleSingleFullBufferResponse(response, textDocument, lax);
+	}
+
+	private handleSingleFullBufferResponse(response: FullBufferQueryResponse, textDocument: TextDocument, lax?: 'lax') {
+		if (response.kind === 'message' && response.level === 'progress') {
+			handleIdeProgress(textDocument, response.contents as IdeProgress, lax === 'lax', this);
+		} else if (response.kind === 'message' && response.level === 'info') {
+			console.info("Info: " + response.contents);
+		} else if (response.kind === 'message' && response.level === 'error') {
+			// TODO(klinvill): Would be nice to surface these as diagnostics
+			// that show where F* crashed.
+			console.error("Error: " + response.contents);
+		} else if (response.kind === 'message' && response.level === 'warning') {
+			// TODO(klinvill): Would be nice to surface these as diagnostics
+			// that show the lines that caused F* to emit a warning.
+			console.warn("Warning: " + response.contents);
+		} else if (response.kind === 'message' && response.level === 'proof-state') {
+			handleIdeProofState(textDocument, response.contents as IdeProofState, this);
+		} else if (response.kind === 'response') {
+			// TODO(klinvill): if a full-buffer query is interrupted, a null response seems to be sent along with a status. Is this always the behavior that occurs?
+			if (!response.response) {
+				console.info("Query cancelled");
+			} else if (Array.isArray(response.response)) {
+				handleIdeDiagnostics(textDocument, response.response as IdeError[], lax === 'lax', this);
+			} else {
+				handleIdeSymbol(textDocument, response.response as IdeSymbol, this);
+			}
+		} else {
+			console.warn(`Unhandled full-buffer response: ${JSON.stringify(response)}`);
 		}
 	}
 
 	// Sending a LookupQuery to fstar_lax_ide, if flycheck is enabled
 	// otherwise send lookup queries to fstar_ide
-	requestSymbolInfo(textDocument: TextDocument, position: Position, wordAndRange: WordAndRange): void {
+	async requestSymbolInfo(textDocument: TextDocument, position: Position, wordAndRange: WordAndRange) {
 		const uri = textDocument.uri;
 		const filePath = URI.parse(uri).fsPath;
-		const query: LookupQuery = {
-			query: "lookup",
-			args: {
-				context: "code",
-				symbol: wordAndRange.word,
-				"requested-info": ["type", "documentation", "defined-at"],
-				location: {
-					filename: filePath,
-					line: position.line + 1,
-					column: position.character
-				},
-				"symbol-range": wordAndRange.range
-			}
-		};
-		this.sendRequestForDocument(textDocument, query, this.configurationSettings.flyCheck ? 'lax' : undefined);
+		const lax = this.configurationSettings.flyCheck ? 'lax' : undefined;
+		const fstar_conn = this.getFStarConnection(textDocument, lax);
+		if (!fstar_conn) { return; }
+		const result = await fstar_conn.lookupQuery(filePath, position, wordAndRange.word, wordAndRange.range);
+		handleIdeSymbol(textDocument, result.response as IdeSymbol, this);
 	}
 
 
@@ -400,16 +373,16 @@ export class Server {
 		};
 	}
 
-	killFStarProcessesForDocument(textDocument: TextDocument) {
+	closeFStarProcessesForDocument(textDocument: TextDocument) {
 		const docState = this.getDocumentState(textDocument.uri);
 		if (!docState) return;
-		docState.fstar.proc.kill();
-		docState.fstar_lax.proc.kill();
+		docState.fstar.close();
+		docState.fstar_lax.close();
 		this.documentStates.delete(textDocument.uri);
 	}
 
-	// Get the FStar instance for the given document
-	getFStar(textDocument: TextDocument, lax?: 'lax'): FStar | undefined {
+	// Get the FStarConnection instance for the given document
+	getFStarConnection(textDocument: TextDocument, lax?: 'lax'): FStarConnection | undefined {
 		const uri = textDocument.uri;
 		const doc_state = this.getDocumentState(uri);
 		if (lax) {
@@ -443,15 +416,23 @@ export class Server {
 			console.log("Server got settings: " + JSON.stringify(settings));
 		}
 		this.configurationSettings = settings;
+
+		// FStarConnection objects store their own debug flag, so we need to update them all with the latest value.
+		this.documentStates.forEach((docState, uri) => {
+			docState.fstar.debug = settings.debug;
+			docState.fstar_lax.debug = settings.debug;
+		});
 	}
 
 	async refreshDocumentState(textDocument: TextDocument) {
-		const fstar = await FStar.fromInferredConfig(textDocument, this.workspaceFolders, this.connection, this.configurationSettings);
+		const fstar_config = await FStar.getFStarConfig(textDocument, this.workspaceFolders, this.connection, this.configurationSettings);
+		const filePath = URI.parse(textDocument.uri);
+
+		const fstar = FStarConnection.tryCreateFStarConnection(fstar_config, filePath,  this.configurationSettings.debug);
 		// Failed to start F*
 		if (!fstar) { return; }
 
-		// We can just re-use the configuration used for the non-lax F* instance.
-		const fstar_lax = FStar.trySpawnFstar(fstar.config, textDocument, this.configurationSettings, this.connection, 'lax');
+		const fstar_lax = FStarConnection.tryCreateFStarConnection(fstar_config, filePath,  this.configurationSettings.debug, 'lax');
 		// Failed to start F* lax
 		if (!fstar_lax) { return; }
 
@@ -470,21 +451,11 @@ export class Server {
 			prefix_stale: false,
 		});
 
-		// Set the event handlers for the fstar processes
-		const handleFStarResponseForDocument = handleFStarResponseForDocumentFactory();
-
-		fstar.proc.stdin?.setDefaultEncoding('utf-8');
-		fstar.proc.stdout?.on('data', (data) => { handleFStarResponseForDocument(textDocument, data, false, this); });
-		fstar.proc.stderr?.on('data', (data) => { console.error("fstar stderr: " + data); });
-		fstar_lax.proc.stdin?.setDefaultEncoding('utf-8');
-		fstar_lax.proc.stdout?.on('data', (data) => { handleFStarResponseForDocument(textDocument, data, true, this); });
-		fstar_lax.proc.stderr?.on('data', (data) => { console.error("fstar lax stderr: " + data); });
-
-		// Send the initial dummy vfs-add request to the fstar processes
-		const filePath = URI.parse(textDocument.uri);
-		const vfs_add: VfsAdd = { "query": "vfs-add", "args": { "filename": filePath.fsPath, "contents": textDocument.getText() } };
-		this.sendRequestForDocument(textDocument, vfs_add);
-		this.sendRequestForDocument(textDocument, vfs_add, 'lax');
+		// Send the initial dummy vfs-add request to the fstar processes.
+		fstar.vfsAddRequest(filePath.fsPath, textDocument.getText())
+			.catch(e => console.error(`vfs-add request to F* process failed: ${e}`));
+		fstar_lax.vfsAddRequest(filePath.fsPath, textDocument.getText())
+			.catch(e => console.error(`vfs-add request to lax F* process failed: ${e}`));
 	}
 
 	// Initialization of the LSP server: Called once when the workspace is opened
@@ -539,10 +510,10 @@ export class Server {
 
 	// The client (e.g. extension) acknowledged the initialization
 	private async onInitializedHandler() {
-		this.updateConfigurationSettings();
+		await this.updateConfigurationSettings();
 		if (this.hasConfigurationCapability) {
 			// Register for all configuration changes.
-			this.connection.conn.client.register(DidChangeConfigurationNotification.type, undefined);
+			await this.connection.conn.client.register(DidChangeConfigurationNotification.type, undefined);
 			// const settings = connection.workspace.getConfiguration('fstarVSCodeAssistant');
 			// const settings = connection.workspace.getConfiguration();
 			// console.log("Server got settings: " + JSON.stringify(settings));
@@ -577,7 +548,7 @@ export class Server {
 			return [];
 		}
 		let shouldSendRequest = false;
-		let bestMatch: { key: string; value: IdeAutoCompleteResponses } = { key: "", value: [] };
+		let bestMatch: { key: string; value: IdeAutoCompleteOptions } = { key: "", value: [] };
 		autoCompleteResponses.auto_completions.forEach((response) => {
 			if (response.key.length > bestMatch.key.length) {
 				bestMatch = response;
@@ -588,16 +559,14 @@ export class Server {
 			const wordAndRange = autoCompleteResponses.wordAndRange;
 			// Don't send requests for very short words
 			if (wordAndRange.word.length < 2) return [];
-			const autoCompletionRequest: AutocompleteRequest = {
-				"query": "autocomplete",
-				"args": {
-					"partial-symbol": wordAndRange.word,
-					"context": "code"
-				}
-			};
-			this.sendRequestForDocument(doc, autoCompletionRequest, this.configurationSettings.flyCheck ? "lax" : undefined);
+			const lax = this.configurationSettings.flyCheck ? "lax" : undefined;
+			const fstar_conn = this.getFStarConnection(doc, lax);
+			// TODO(klinvill): should we await the response here? The autocomplete response table is populated asynchronously.
+			const responses = fstar_conn?.autocompleteRequest(wordAndRange.word);
+			responses?.then(rs => handleIdeAutoComplete(doc, rs.response as IdeAutoCompleteOptions, this)).catch(() => {});
 		}
 		const items: CompletionItem[] = [];
+		// TODO(klinvill): maybe replace this with a map() call?
 		bestMatch.value.forEach((response) => {
 			const data = response;
 			// vscode replaces the word at the cursor with the completion item
@@ -652,7 +621,7 @@ export class Server {
 		if (symbol && symbol.symbolInfo) {
 			return formatIdeSymbol(symbol.symbolInfo);
 		}
-		this.requestSymbolInfo(textDoc, textDocumentPosition.position, symbol.wordAndRange);
+		this.requestSymbolInfo(textDoc, textDocumentPosition.position, symbol.wordAndRange).catch(() => {});
 		return { contents: { kind: 'plaintext', value: "Looking up:" + symbol.wordAndRange.word } };
 	}
 
@@ -673,7 +642,7 @@ export class Server {
 			const location = LocationLink.create(uri, range, range);
 			return [location];
 		}
-		this.requestSymbolInfo(textDoc, defParams.position, symbol.wordAndRange);
+		this.requestSymbolInfo(textDoc, defParams.position, symbol.wordAndRange).catch(() => {});
 		return [];
 	}
 
@@ -732,15 +701,15 @@ export class Server {
 		}
 	}
 
-	private onRestartRequest(uri: any) {
+	private async onRestartRequest(uri: any) {
 		// console.log("Received restart request with parameters: " + uri);
 		const textDocument = this.getDocument(uri);
-		this.onRestartHandler(textDocument);
+		await this.onRestartHandler(textDocument);
 	}
 
 	private async onRestartHandler(textDocument?: TextDocument) {
 		if (!textDocument) { return; }
-		this.killFStarProcessesForDocument(textDocument);
+		this.closeFStarProcessesForDocument(textDocument);
 		await this.refreshDocumentState(textDocument);
 		this.connection.sendStatusClear({ uri: textDocument.uri });
 		// And ask the lax fstar process to verify it
@@ -754,36 +723,26 @@ export class Server {
 		const range: { line: number; character: number }[] = params[1];
 		const textDocument = this.getDocument(uri);
 		if (!textDocument) { return; }
-		const cancelRequest: CancelRequest = {
-			query: "cancel",
-			args: {
-				"cancel-line": range[0].line + 1,
-				"cancel-column": range[0].character
-			}
-		};
-		this.sendRequestForDocument(textDocument, cancelRequest);
+		// TODO(klinvill): It looks like this function can only be called for
+		// non-lax checking. Is that correct?
+		const fstar_conn = this.getFStarConnection(textDocument);
+		fstar_conn?.cancelRequest(range[0]);
 	}
 
-	private onKillAndRestartSolverRequest(uri: any) {
+	private async onKillAndRestartSolverRequest(uri: any) {
 		const textDocument = this.getDocument(uri);
 		if (!textDocument) { return; }
-		const documentState = this.getDocumentState(textDocument.uri);
-		if (!documentState) { return; }
-		const fstar = documentState.fstar;
-
-		fstar.killZ3SubProcess(this.configurationSettings);
-
-		// Wait for a second for processes to die before restarting the solver
-		setTimeout(() => {
-			this.sendRequestForDocument(textDocument, { query: "restart-solver", args: {} });
-		}, 1000);
+		// TODO(klinvill): It looks like this function only restarts the
+		// standard F* solver (not the lax one), is this the desired behavior?
+		const fstar_conn = this.getFStarConnection(textDocument);
+		await fstar_conn?.restartSolver();
 	}
 
 	private onKillAllRequest(params: any) {
 		this.documentStates.forEach((docState, uri) => {
 			const textDoc = this.getDocument(uri);
 			if (!textDoc) { return; }
-			this.killFStarProcessesForDocument(textDoc);
+			this.closeFStarProcessesForDocument(textDoc);
 		});
 		return;
 	}
@@ -796,12 +755,12 @@ export class Server {
 
 interface DocumentState {
 	// The main fstar.exe process for verifying the current document
-	fstar: FStar;
+	fstar: FStarConnection;
 	alerted_fstar_process_exited: boolean;
 	fstar_diagnostics: Diagnostic[];
 
 	// The fstar.exe process for quickly handling on-change events, symbol lookup etc
-	fstar_lax: FStar;
+	fstar_lax: FStarConnection;
 	alerted_fstar_lax_process_exited: boolean;
 	fstar_lax_diagnostics: Diagnostic[];
 
@@ -812,7 +771,7 @@ interface DocumentState {
 	// A proof-state table populated by fstar_ide when running tactics, displayed in onHover
 	hover_proofstate_info: Map<number, IdeProofState>;
 	// A table of auto-complete responses
-	auto_complete_info: Map<string, IdeAutoCompleteResponses>;
+	auto_complete_info: Map<string, IdeAutoCompleteOptions>;
 	// A flag to indicate if the prefix of the buffer is stale
 	prefix_stale: boolean;
 }

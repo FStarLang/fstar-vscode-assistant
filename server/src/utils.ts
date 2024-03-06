@@ -11,6 +11,7 @@ import * as fs from 'fs';
 import * as util from 'util';
 
 import { Server } from './server';
+import { FStarRange, IdeProofState, IdeProofStateContextualGoal, IdeSymbol } from './fstar_messages';
 
 ////////////////////////////////////////////////////////////////////////////////////
 // Range utilities
@@ -37,8 +38,8 @@ export function qualifyFilename(fname: string, textdocUri: string, server: Serve
 	if (fname != "<input>") {
 		// if we have a relative path, then qualify it to the base of the
 		// F* process's cwd
-		if (!path.isAbsolute(fname) && doc_state && doc_state.fstar.config.cwd) {
-			const base = doc_state.fstar.config.cwd;
+		const base = doc_state?.fstar.fstar_config().cwd;
+		if (!path.isAbsolute(fname) && base) {
 			//concate the base and the relative path
 			return pathToFileURL(path.join(base, fname)).toString();
 		}
