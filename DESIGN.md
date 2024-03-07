@@ -150,19 +150,10 @@ we have the following four custom messages send from server.ts to client.ts
 
 # Publishing an extension
 
-See https://code.visualstudio.com/api/working-with-extensions/publishing-extension
+The extension is automatically published by CI if you push a release:
+1. `npx vsce package minor` to bump the version and create a release tag.
+2. `git push --follow-tags` to push the release.
 
-Some notes:
 
-1. Run `npx vsce package <version number>`
-   - This will bump the version number in package.json and package-lock.json
-   
-   - It also tries to a git add once its changed these files, but this
-     step usually fails for me with some git error about paths 
-
-2. `git add` and `commit` the changes to package.json and package-lock.json
-
-3. Run `npx vsce package`: This time it should produce a fstar-vscode-assistant-<version>.vsix
-
-4. Upload the package to https://marketplace.visualstudio.com/manage/publishers/fstarlang
-   (You need credentials to do this. Ask one of the extension developers.)
+If you want to build the extension for local testing,
+you can create a `.vsix` using `npx vsce package`.
