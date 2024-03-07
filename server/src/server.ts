@@ -34,7 +34,7 @@ import { formatIdeProofState, fstarRangeAsRange, mkPosition, qualifyFilename, ra
 import { ClientConnection } from './client_connection';
 import { FStarConnection, StreamedResult } from './fstar_connection';
 import { FStar } from './fstar';
-import { FStarRange, IdeAutoCompleteOptions, IdeSymbol, IdeProofState, IdeProgress, IdeError, FullBufferQueryResponse } from './fstar_messages';
+import { FStarRange, IdeProofState, IdeProgress, IdeError, FullBufferQueryResponse } from './fstar_messages';
 import { handleIdeDiagnostics, handleIdeProgress, handleIdeProofState } from './fstar_handlers';
 
 // LSP Server
@@ -394,12 +394,9 @@ export class Server {
 		// Initialize the document state for this doc
 		this.documentStates.set(textDocument.uri, {
 			fstar: fstar,
-			alerted_fstar_process_exited: false,
 			fstar_diagnostics: [],
 			fstar_lax: fstar_lax,
-			alerted_fstar_lax_process_exited: false,
 			fstar_lax_diagnostics: [],
-			last_query_id: 0,
 			hover_proofstate_info: new Map(),
 			prefix_stale: false,
 		});
@@ -673,16 +670,12 @@ export class Server {
 interface DocumentState {
 	// The main fstar.exe process for verifying the current document
 	fstar: FStarConnection;
-	alerted_fstar_process_exited: boolean;
 	fstar_diagnostics: Diagnostic[];
 
 	// The fstar.exe process for quickly handling on-change events, symbol lookup etc
 	fstar_lax: FStarConnection;
-	alerted_fstar_lax_process_exited: boolean;
 	fstar_lax_diagnostics: Diagnostic[];
 
-	// Every query sent to fstar_ide & fstar_lax_ide is assigned a unique id
-	last_query_id: number;
 	// A proof-state table populated by fstar_ide when running tactics, displayed in onHover
 	hover_proofstate_info: Map<number, IdeProofState>;
 	// A flag to indicate if the prefix of the buffer is stale

@@ -9,7 +9,8 @@ import {
 import { setTimeout } from 'timers/promises';
 
 import { FStar, FStarConfig } from './fstar';
-import { isProtocolInfo, ProtocolInfo, FullBufferQuery, FStarRange, LookupQuery, VfsAdd, AutocompleteRequest, CancelRequest, FullBufferQueryResponse, IdeSymbolResponse, IdeAutoCompleteResponse, IdeProgressResponse, IdeVfsAddResponse, IdeResponse} from './fstar_messages';
+import { isProtocolInfo, ProtocolInfo, FullBufferQuery, LookupQuery, VfsAdd, AutocompleteRequest, CancelRequest,
+	FullBufferQueryResponse, IdeSymbolResponse, IdeAutoCompleteResponse, IdeProgressResponse, IdeVfsAddResponse, IdeResponse} from './fstar_messages';
 
 // For full-buffer queries, F* chunks the buffer into fragments and responds
 // with several messages, one for each fragment until the first failing
