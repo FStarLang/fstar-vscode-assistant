@@ -522,9 +522,9 @@ export class Server {
 		const lax = this.configurationSettings.flyCheck ? 'lax' : undefined;
 		const conn = this.getFStarConnection(textDoc, lax);
 		if (!conn) return;
-		const filePath = URI.parse(textDoc.uri).fsPath;
 		const word = this.findWordAtPosition(textDoc, textDocumentPosition.position);
-		const result = await conn.lookupQuery(filePath, textDocumentPosition.position, word.word);
+		// The filename '<input>' here must be exactly the same the we used in the full buffer request.
+		const result = await conn.lookupQuery('<input>', textDocumentPosition.position, word.word);
 		if (result.status !== 'success') return;
 		return {
 			contents: {
@@ -547,9 +547,9 @@ export class Server {
 		const lax = this.configurationSettings.flyCheck ? 'lax' : undefined;
 		const conn = this.getFStarConnection(textDoc, lax);
 		if (!conn) return [];
-		const filePath = URI.parse(textDoc.uri).fsPath;
 		const word = this.findWordAtPosition(textDoc, defParams.position);
-		const result = await conn.lookupQuery(filePath, defParams.position, word.word);
+		// The filename '<input>' here must be exactly the same the we used in the full buffer request.
+		const result = await conn.lookupQuery('<input>', defParams.position, word.word);
 		if (result.status !== 'success') return [];
 		const defined_at = result.response["defined-at"];
 		const range = fstarRangeAsRange(defined_at);
