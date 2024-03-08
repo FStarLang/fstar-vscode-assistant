@@ -271,6 +271,8 @@ export class FStarConnection {
 	////////////////////////////////////////////////////////////////////////////////////
 
 	private handleResponse(msg: object) {
+		if (this.debug) console.log("<<< " + JSON.stringify(msg));
+
 		// Events for specific message types
 		if (isProtocolInfo(msg)) {
 			this.handleProtocolInfo(msg as ProtocolInfo);
