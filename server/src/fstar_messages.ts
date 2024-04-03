@@ -46,7 +46,7 @@ export interface IdeModule {
 	path: string;
 	loaded: boolean;
 }
-export type IdeLookupResponseResponse =
+export type IdeLookupResponse =
 	IdeSymbol | IdeModule;
 
 // IdeProofState: fstar.exe sends informative messages when running tactics
@@ -109,17 +109,29 @@ export interface IdeProgress {
 export type IdeAutoCompleteOption = [matchLength: number, annotation: string, candidate: string];
 export type IdeAutoCompleteOptions = IdeAutoCompleteOption[];
 
+export interface IdeResponseBase {
+	'query-id': string;
+	kind: 'response';
+	status: string;
+	response: unknown;
+}
+
 // Replies from F* either take the form of response messages or status messages.
 // See
 // https://github.com/FStarLang/FStar/wiki/Editor-support-for-F*#message-format
 // for more details.
 //
-// Common response message format from F*. Sent in response to a query.
-export interface IdeQueryResponse {
-	'query-id': string;
-	kind: 'response';
-	status: 'success' | 'failure';
+// Common success response message format from F*. Sent in response to a query.
+export interface IdeResponseOk<T> extends IdeResponseBase {
+	status: 'success';
+	response: T;
 }
+
+export interface IdeResponseErr extends IdeResponseBase {
+	status: 'failure' | 'protocol-violation';
+}
+
+export type IdeResponse<T> = IdeResponseOk<T> | IdeResponseErr;
 
 // Common status message format from F*. Sent in response to a query.
 export interface IdeQueryMessage {
@@ -146,37 +158,9 @@ export interface IdeProofStateResponse extends IdeQueryMessage {
 	contents: IdeProofState;
 }
 
-// Documented at https://github.com/FStarLang/FStar/wiki/Editor-support-for-F*#lookup
-export interface IdeLookupResponse extends IdeQueryResponse {
-	response: IdeLookupResponseResponse;
-}
-
-// Documented at https://github.com/FStarLang/FStar/wiki/Editor-support-for-F*#push
-export interface IdeDiagnosticsResponse extends IdeQueryResponse {
-	response: IdeDiagnostic[];
-}
-
-// Replies stemming from full-buffer interruptions seem to have an empty (null)
-// value for the response field
-export interface IdeInterruptedResponse extends IdeQueryResponse {
-	response: null;
-}
-
-// Documented at https://github.com/FStarLang/FStar/wiki/Editor-support-for-F*#auto-complete
-export interface IdeAutoCompleteResponse extends IdeQueryResponse {
-	response: IdeAutoCompleteOptions;
-}
-
-// Documented at https://github.com/FStarLang/FStar/wiki/Editor-support-for-F*#vfs-add
-export interface IdeVfsAddResponse extends IdeQueryResponse {
-	response: null;
-}
-
-export type IdeResponse = IdeProgressResponse | IdeStatusResponse | IdeProofStateResponse | IdeLookupResponse | IdeDiagnosticsResponse | IdeInterruptedResponse | IdeAutoCompleteResponse;
-
 // Most queries seem to have only one kind of expected response, but full-buffer
 // queries can respond with a large variety of messages.
-export type FullBufferQueryResponse = IdeProgressResponse | IdeStatusResponse | IdeProofStateResponse | IdeLookupResponse | IdeDiagnosticsResponse | IdeInterruptedResponse;
+export type FullBufferQueryResponse = IdeProgressResponse | IdeStatusResponse | IdeProofStateResponse | IdeResponseOk<IdeLookupResponse | IdeDiagnostic[] | null>;
 
 ////////////////////////////////////////////////////////////////////////////////////
 // Request messages in the IDE protocol that fstar.exe uses

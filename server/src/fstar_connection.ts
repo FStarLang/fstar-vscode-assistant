@@ -10,7 +10,7 @@ import { setTimeout } from 'timers/promises';
 
 import { FStar, FStarConfig } from './fstar';
 import { isProtocolInfo, ProtocolInfo, FullBufferQuery, LookupQuery, VfsAdd, AutocompleteRequest, CancelRequest,
-	FullBufferQueryResponse, IdeLookupResponse, IdeAutoCompleteResponse, IdeProgressResponse, IdeVfsAddResponse, IdeResponse} from './fstar_messages';
+	FullBufferQueryResponse, IdeResponse, IdeResponseBase, IdeLookupResponse, IdeAutoCompleteOptions} from './fstar_messages';
 
 // For full-buffer queries, F* chunks the buffer into fragments and responds
 // with several messages, one for each fragment until the first failing
@@ -27,7 +27,11 @@ export class FStarConnection {
 	//
 	// Maps query-ids to promises that will be resolved with the appropriate
 	// response.
-	private pending_responses: Map<number, {resolve: (v: IdeResponse | StreamedResult<IdeResponse>) => void, reject: (e: Error) => void, is_stream: boolean}>;
+	private pending_responses: Map<number, {
+		resolve: (v: IdeResponseBase | StreamedResult<IdeResponseBase>) => void,
+		reject: (e: Error) => void,
+		is_stream: boolean,
+	}>;
 	private fstar: FStar;
 
 	constructor(fstar: FStar, public debug: boolean) {
@@ -97,7 +101,7 @@ export class FStarConnection {
 	//
 	// @param expect_response indicates if a response from F* is expected for
 	// this request.
-	private async request(msg: any, expect_response = true, is_stream = false): Promise<any> {
+	private async requestCore(msg: any, expect_response = true, is_stream = false): Promise<any> {
 		const qid = this.last_query_id + 1;
 		this.last_query_id = qid;
 		msg["query-id"] = '' + qid;
@@ -126,17 +130,21 @@ export class FStarConnection {
 		}
 	}
 
+	private async request<Req, Res>(msg: Req): Promise<IdeResponse<Res>> {
+		return this.requestCore(msg);
+	}
+
 	// Wrapper for a request that doesn't expect a response.
 	private silentRequest<T>(query: T) {
 		const expectResponse = false;
-		this.request(query, expectResponse).catch(() => {});
+		this.requestCore(query, expectResponse).catch(() => {});
 	}
 
 	// Wrapper for a request that results in a stream of responses.
 	private async streamRequest<T, R>(query: T) : Promise<StreamedResult<R>> {
 		const expectResponse = true;
 		const is_stream = true;
-		return this.request(query, expectResponse, is_stream);
+		return this.requestCore(query, expectResponse, is_stream);
 	}
 
 	// full-buffer queries have significantly different behavior than other
@@ -188,8 +196,8 @@ export class FStarConnection {
 	//
 	// For more details, see:
 	// https://github.com/FStarLang/FStar/wiki/Editor-support-for-F*#lookup
-	async lookupQuery(filePath: string, position: Position, word: string): Promise<IdeLookupResponse> {
-		const query: LookupQuery = {
+	async lookupQuery(filePath: string, position: Position, word: string) {
+		return this.request<LookupQuery, IdeLookupResponse>({
 			query: "lookup",
 			args: {
 				context: "code",
@@ -201,23 +209,21 @@ export class FStarConnection {
 					column: position.character
 				},
 			}
-		};
-		return this.request(query);
+		});
 	}
 
 	// Request to map a file into F*'s virtual file system.
 	//
 	// For more details, see:
 	// https://github.com/FStarLang/FStar/wiki/Editor-support-for-F*#vfs-add
-	async vfsAddRequest(filePath: string, contents: string) : Promise<IdeVfsAddResponse> {
-		const query: VfsAdd = {
+	async vfsAddRequest(filePath: string, contents: string) {
+		return this.request<VfsAdd, null>({
 			query: "vfs-add",
 			args: {
 				filename: filePath,
 				contents: contents
 			}
-		};
-		return this.request(query);
+		});
 	}
 
 	// Request to get a list of completions for the given word (commonly a
@@ -225,15 +231,14 @@ export class FStarConnection {
 	//
 	// For more details, see:
 	// https://github.com/FStarLang/FStar/wiki/Editor-support-for-F*#auto-complete
-	async autocompleteRequest(word: string) : Promise<IdeAutoCompleteResponse> {
-		const query: AutocompleteRequest = {
+	async autocompleteRequest(word: string) {
+		return this.request<AutocompleteRequest, IdeAutoCompleteOptions>({
 			"query": "autocomplete",
 			"args": {
 				"partial-symbol": word,
 				"context": "code"
 			}
-		};
-		return this.request(query);
+		});
 	}
 
 	// A Cancel message should be sent to F* when the document changes at a
@@ -270,7 +275,7 @@ export class FStarConnection {
 	// Methods to handle responses from F*
 	////////////////////////////////////////////////////////////////////////////////////
 
-	private handleResponse(msg: object) {
+	private handleResponse(msg: any) {
 		if (this.debug) console.log("<<< " + JSON.stringify(msg));
 
 		// Events for specific message types
@@ -279,7 +284,7 @@ export class FStarConnection {
 		} else {
 			// Either we expect unprompted protocol-info messages, or we expect
 			// responses to a query we sent.
-			const r = msg as IdeResponse;
+			const r = msg as IdeResponseBase;
 			// Note: responses to full-buffer queries are sent with query ids
 			// with non-strictly incrementing fractional components. E.g. if the
 			// query id is 2, the responses can come back with query ids 2, 2.1,
@@ -301,7 +306,7 @@ export class FStarConnection {
 			// the promise is then responsible for parsing the response.
 			if (pr.is_stream) {
 				// A stream is assumed to always ends with a full-buffer-finished message
-				const done = r.kind === 'message' && r.level === 'progress' && ((r as IdeProgressResponse).contents).stage === 'full-buffer-finished';
+				const done = msg?.kind === 'message' && msg?.level === 'progress' && msg?.contents?.stage === 'full-buffer-finished';
 
 				this.respondStream(qid, r, done);
 			} else {
@@ -313,7 +318,7 @@ export class FStarConnection {
 	// Handles an expected response by fulfilling the promise for the specified
 	// query and removing it from the list of pending responses. The promise is
 	// resolved with the response.
-	private respond(qid: number, response: IdeResponse | StreamedResult<IdeResponse>) {
+	private respond(qid: number, response: IdeResponseBase | StreamedResult<IdeResponseBase>) {
 		const pr = this.pending_responses.get(qid);
 		if (!pr) {
 			console.warn(`No inflight query found for query-id: ${qid}, got response: ${JSON.stringify(response)}.`);
@@ -329,7 +334,7 @@ export class FStarConnection {
 	// response in the stream, the second element in the StreamedResult will be
 	// undefined. Otherwise, the second element in the StreamedResult is a
 	// promise that will be resolved with the next response in the stream.
-	private respondStream(qid: number, response: IdeResponse, done: boolean) {
+	private respondStream(qid: number, response: IdeResponseBase, done: boolean) {
 		if (done) {
 			this.respond(qid, [response, undefined]);
 		} else {
@@ -345,7 +350,7 @@ export class FStarConnection {
 			const new_promise = new Promise((resolve, reject) => {
 				this.pending_responses.set(qid, {resolve, reject, is_stream: true});
 			});
-			pr.resolve([response, new_promise] as StreamedResult<IdeResponse>);
+			pr.resolve([response, new_promise] as StreamedResult<IdeResponseBase>);
 		}
 	}
 
