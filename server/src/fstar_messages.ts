@@ -81,9 +81,7 @@ export interface IdeProofStateGoal {
 
 // IDEError: fstar.exe sends this message when reporting errors and warnings
 //
-// TODO(klinvill): These status messages aren't necessarily errors. Maybe should
-// be renamed to `IdeDiagnostic` (following the `handleIdeDiagnostics` name)?
-export interface IdeError {
+export interface IdeDiagnostic {
 	message: string;
 	number: number;
 	level: 'warning' | 'error' | 'info';
@@ -155,7 +153,7 @@ export interface IdeLookupResponse extends IdeQueryResponse {
 
 // Documented at https://github.com/FStarLang/FStar/wiki/Editor-support-for-F*#push
 export interface IdeDiagnosticsResponse extends IdeQueryResponse {
-	response: IdeError[];
+	response: IdeDiagnostic[];
 }
 
 // Replies stemming from full-buffer interruptions seem to have an empty (null)

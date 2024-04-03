@@ -34,7 +34,7 @@ import { formatIdeProofState, fstarRangeAsRange, mkPosition, qualifyFilename, ra
 import { ClientConnection } from './client_connection';
 import { FStarConnection, StreamedResult } from './fstar_connection';
 import { FStar } from './fstar';
-import { FStarRange, IdeProofState, IdeProgress, IdeError, FullBufferQueryResponse } from './fstar_messages';
+import { FStarRange, IdeProofState, IdeProgress, IdeDiagnostic, FullBufferQueryResponse } from './fstar_messages';
 import { handleIdeDiagnostics, handleIdeProgress, handleIdeProofState } from './fstar_handlers';
 
 // LSP Server
@@ -319,7 +319,7 @@ export class Server {
 			if (!response.response) {
 				console.info("Query cancelled");
 			} else if (Array.isArray(response.response)) {
-				handleIdeDiagnostics(textDocument, response.response as IdeError[], lax === 'lax', this);
+				handleIdeDiagnostics(textDocument, response.response as IdeDiagnostic[], lax === 'lax', this);
 			} else {
 				// ignore
 			}

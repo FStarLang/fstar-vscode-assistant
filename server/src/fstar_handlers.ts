@@ -13,7 +13,7 @@ import * as crypto from 'crypto';
 
 import { Server } from './server';
 import { StatusOkMessage, ok_kind } from './client_connection';
-import { IdeLookupResponseResponse, IdeProofState, IdeError, IdeProgress, IdeAutoCompleteOptions, FStarRange } from './fstar_messages';
+import { IdeLookupResponseResponse, IdeProofState, IdeDiagnostic, IdeProgress, IdeAutoCompleteOptions, FStarRange } from './fstar_messages';
 import { mkPosition, fstarRangeAsRange, qualifyFilename } from './utils';
 
 
@@ -129,7 +129,7 @@ export function handleIdeProgress(textDocument: TextDocument, contents: IdeProgr
 
 // If we get errors and warnings from F*, we send them to VSCode as diagnostics,
 // which will show them as squiggles in the editor.
-export function handleIdeDiagnostics(textDocument: TextDocument, response: IdeError[], lax: boolean, server: Server) {
+export function handleIdeDiagnostics(textDocument: TextDocument, response: IdeDiagnostic[], lax: boolean, server: Server) {
 	function ideErrorLevelAsDiagnosticSeverity(level: string): DiagnosticSeverity {
 		switch (level) {
 			case "warning": return DiagnosticSeverity.Warning;
