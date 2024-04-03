@@ -11,7 +11,7 @@ import * as fs from 'fs';
 import * as util from 'util';
 
 import { Server } from './server';
-import { FStarPosition, FStarRange, IdeProofState, IdeProofStateContextualGoal, IdeSymbol } from './fstar_messages';
+import { FStarPosition, FStarRange, IdeProofState, IdeProofStateContextualGoal, IdeLookupResponseResponse } from './fstar_messages';
 
 ////////////////////////////////////////////////////////////////////////////////////
 // Range utilities

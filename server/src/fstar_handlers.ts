@@ -13,7 +13,7 @@ import * as crypto from 'crypto';
 
 import { Server } from './server';
 import { StatusOkMessage, ok_kind } from './client_connection';
-import { IdeSymbol, IdeProofState, IdeError, IdeProgress, IdeAutoCompleteOptions, FStarRange } from './fstar_messages';
+import { IdeLookupResponseResponse, IdeProofState, IdeError, IdeProgress, IdeAutoCompleteOptions, FStarRange } from './fstar_messages';
 import { mkPosition, fstarRangeAsRange, qualifyFilename } from './utils';
 
 

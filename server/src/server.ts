@@ -526,22 +526,30 @@ export class Server {
 		// The filename '<input>' here must be exactly the same the we used in the full buffer request.
 		const result = await conn.lookupQuery('<input>', textDocumentPosition.position, word.word);
 		if (result.status !== 'success') return;
-		return {
-			contents: {
-				kind: 'markdown',
-				value:
-					"```fstar\n" +
-					result.response.name + ":\n" +
-					result.response.type + "\n" +
-					"```\n"
-			},
-		};
+		switch (result.response.kind) {
+			case 'symbol': return {
+				contents: {
+					kind: 'markdown',
+					value:
+						"```fstar\n" +
+						result.response.name + ":\n" +
+						result.response.type + "\n" +
+						"```\n"
+				},
+			};
+			case 'module': return {
+				contents: {
+					kind: 'markdown',
+					value: "```fstar\nmodule "+result.response.name+"\n```\n"
+				},
+			};
+		}
 	}
 
 	// The onDefinition handler is called when the user clicks on a symbol
 	// It's very similar to the onHover handler, except that it returns a
 	// LocationLink object instead of a Hover object
-	private async onDefinition(defParams: DefinitionParams): Promise<LocationLink[]> {
+	private async onDefinition(defParams: DefinitionParams): Promise<LocationLink[] | undefined> {
 		const textDoc = this.getDocument(defParams.textDocument.uri);
 		if (!textDoc) { return []; }
 		const lax = this.configurationSettings.flyCheck ? 'lax' : undefined;
@@ -551,13 +559,22 @@ export class Server {
 		// The filename '<input>' here must be exactly the same the we used in the full buffer request.
 		const result = await conn.lookupQuery('<input>', defParams.position, word.word);
 		if (result.status !== 'success') return [];
-		const defined_at = result.response["defined-at"];
-		const range = fstarRangeAsRange(defined_at);
-		return [{
-			targetUri: qualifyFilename(defined_at.fname, textDoc.uri, this),
-			targetRange: range,
-			targetSelectionRange: range,
-		}];
+		if (result.response.kind === 'symbol') {
+			const defined_at = result.response["defined-at"];
+			const range = fstarRangeAsRange(defined_at);
+			return [{
+				targetUri: qualifyFilename(defined_at.fname, textDoc.uri, this),
+				targetRange: range,
+				targetSelectionRange: range,
+			}];
+		} else if (result.response.kind === 'module') {
+			const range: Range = {start: {line: 0, character: 0}, end: {line: 0, character: 0}};
+			return [{
+				targetUri: qualifyFilename(result.response.path, textDoc.uri, this),
+				targetRange: range,
+				targetSelectionRange: range,
+			}];
+		}
 	}
 
 	private async onDocumentRangeFormatting(formatParams: DocumentRangeFormattingParams) {

@@ -40,6 +40,14 @@ export interface IdeSymbol {
 	"symbol-range"?: FStarRange;
 	symbol: string;
 }
+export interface IdeModule {
+	kind: 'module';
+	name: string;
+	path: string;
+	loaded: boolean;
+}
+export type IdeLookupResponseResponse =
+	IdeSymbol | IdeModule;
 
 // IdeProofState: fstar.exe sends informative messages when running tactics
 // The server does not explicitly request the proof state---these messages
@@ -141,8 +149,8 @@ export interface IdeProofStateResponse extends IdeQueryMessage {
 }
 
 // Documented at https://github.com/FStarLang/FStar/wiki/Editor-support-for-F*#lookup
-export interface IdeSymbolResponse extends IdeQueryResponse {
-	response: IdeSymbol;
+export interface IdeLookupResponse extends IdeQueryResponse {
+	response: IdeLookupResponseResponse;
 }
 
 // Documented at https://github.com/FStarLang/FStar/wiki/Editor-support-for-F*#push
@@ -166,11 +174,11 @@ export interface IdeVfsAddResponse extends IdeQueryResponse {
 	response: null;
 }
 
-export type IdeResponse = IdeProgressResponse | IdeStatusResponse | IdeProofStateResponse | IdeSymbolResponse | IdeDiagnosticsResponse | IdeInterruptedResponse | IdeAutoCompleteResponse;
+export type IdeResponse = IdeProgressResponse | IdeStatusResponse | IdeProofStateResponse | IdeLookupResponse | IdeDiagnosticsResponse | IdeInterruptedResponse | IdeAutoCompleteResponse;
 
 // Most queries seem to have only one kind of expected response, but full-buffer
 // queries can respond with a large variety of messages.
-export type FullBufferQueryResponse = IdeProgressResponse | IdeStatusResponse | IdeProofStateResponse | IdeSymbolResponse | IdeDiagnosticsResponse | IdeInterruptedResponse;
+export type FullBufferQueryResponse = IdeProgressResponse | IdeStatusResponse | IdeProofStateResponse | IdeLookupResponse | IdeDiagnosticsResponse | IdeInterruptedResponse;
 
 ////////////////////////////////////////////////////////////////////////////////////
 // Request messages in the IDE protocol that fstar.exe uses
