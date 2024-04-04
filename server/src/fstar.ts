@@ -40,12 +40,12 @@ export class FStar {
 	// `textDocument` file.
 	//
 	// @throws {Error} if fstar.exe cannot be found in the current path
-	static trySpawnFstar(config: FStarConfig, filePath: URI, debug: boolean, lax?: 'lax'): FStar | undefined {
+	static trySpawnFstar(config: FStarConfig, filePath: string, debug: boolean, lax?: 'lax'): FStar | undefined {
 		// F* is assumed to support full-buffers unless it sends a message indicating otherwise
 		const supportsFullBuffer = true;
 
 		// Construct the options for fstar.exe
-		const options = ["--ide", filePath.fsPath];
+		const options = ["--ide", filePath];
 
 		if (lax) {
 			// The lax process actually runs with admit_smt_queries
@@ -63,7 +63,7 @@ export class FStar {
 			config.fstar_exe = "fstar.exe";
 		}
 		if (!config.cwd) {
-			config.cwd = path.dirname(filePath.fsPath);
+			config.cwd = path.dirname(filePath);
 		}
 		if (debug) {
 			console.log("Spawning fstar with options: " + options);
@@ -89,10 +89,9 @@ export class FStar {
 
 	// Dynamically loads the FStarConfiguration for a given file `textDocument`
 	// before attempting to launch an instance of F*.
-	static async fromInferredConfig(textDocument: TextDocument, workspaceFolders: WorkspaceFolder[], connection: ClientConnection,
+	static async fromInferredConfig(filePath: string, workspaceFolders: WorkspaceFolder[], connection: ClientConnection,
 			configurationSettings: fstarVSCodeAssistantSettings, lax?: 'lax'): Promise<FStar | undefined> {
-		const config = await this.getFStarConfig(textDocument, workspaceFolders, connection, configurationSettings);
-		const filePath = URI.parse(textDocument.uri);
+		const config = await this.getFStarConfig(filePath, workspaceFolders, connection, configurationSettings);
 		return this.trySpawnFstar(config, filePath, configurationSettings.debug, lax);
 	}
 
@@ -110,7 +109,7 @@ export class FStar {
 		});
 	}
 
-	static async parseConfigFile(textDocument: TextDocument, configFile: string, connection: ClientConnection, configurationSettings: fstarVSCodeAssistantSettings): Promise<FStarConfig> {
+	static async parseConfigFile(filePath: string, configFile: string, connection: ClientConnection, configurationSettings: fstarVSCodeAssistantSettings): Promise<FStarConfig> {
 		const contents = await util.promisify(fs.readFile)(configFile, 'utf8');
 		function substituteEnvVars(value: string) {
 			return value.replace(/\$([A-Z_]+[A-Z0-9_]*)|\${([A-Z0-9_]*)}/ig,
@@ -120,7 +119,7 @@ export class FStar {
 						return resolved_env_var;
 					}
 					else {
-						connection.sendAlert({ message: "Failed to resolve environment variable " + (a || b), uri: textDocument.uri });
+						connection.sendAlert({ message: "Failed to resolve environment variable " + (a || b), uri: URI.file(filePath).toString() });
 						return "";
 					}
 				});
@@ -154,8 +153,7 @@ export class FStar {
 	// Finds the .fst.config.json for a given file
 	// by searching from that file's directory up to the workspace root
 	// for a .fst.config.json file, taking the one nearest to the file
-	static async findConfigFile(e: TextDocument, workspaceFolders: WorkspaceFolder[], configurationSettings: fstarVSCodeAssistantSettings): Promise<string | undefined> {
-		const filePath = URI.parse(e.uri).fsPath;
+	static async findConfigFile(filePath: string, workspaceFolders: WorkspaceFolder[], configurationSettings: fstarVSCodeAssistantSettings): Promise<string | undefined> {
 		const allEnclosingDirectories = getEnclosingDirectories(filePath);
 		for (const dir of allEnclosingDirectories) {
 			if (configurationSettings.debug) {
@@ -212,13 +210,11 @@ export class FStar {
 	// 1. An *.fst.config.json file in a parent directory inside the current workspace
 	// 2. The output printed by `make My.File.fst-in`
 	// 3. A default configuration
-	static async getFStarConfig(textDocument: TextDocument, workspaceFolders: WorkspaceFolder[], connection: ClientConnection, configurationSettings: fstarVSCodeAssistantSettings): Promise<FStarConfig> {
-		const filePath = URI.parse(textDocument.uri).fsPath;
-
+	static async getFStarConfig(filePath: string, workspaceFolders: WorkspaceFolder[], connection: ClientConnection, configurationSettings: fstarVSCodeAssistantSettings): Promise<FStarConfig> {
 		// 1. Config file
-		const configFilepath = await this.findConfigFile(textDocument, workspaceFolders, configurationSettings);
+		const configFilepath = await this.findConfigFile(filePath, workspaceFolders, configurationSettings);
 		if (configFilepath) {
-			const config = await this.parseConfigFile(textDocument, configFilepath, connection, configurationSettings);
+			const config = await this.parseConfigFile(filePath, configFilepath, connection, configurationSettings);
 			if (config) {
 				// If cwd isn't specified, it's assumed to be the directory in which the
 				// config file is located.

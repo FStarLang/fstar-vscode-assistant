@@ -67,7 +67,7 @@ export class FStarConnection {
 	// filePath, and create a connection to it.
 	//
 	// @throws {Error} from `trySpawnFstar`
-	static tryCreateFStarConnection(fstarConfig: FStarConfig, filePath: URI, debug: boolean, lax?: 'lax') : FStarConnection | undefined {
+	static tryCreateFStarConnection(fstarConfig: FStarConfig, filePath: string, debug: boolean, lax?: 'lax') : FStarConnection | undefined {
 		const fstar = FStar.trySpawnFstar(fstarConfig, filePath, debug, lax);
 		if (fstar)
 			return new FStarConnection(fstar, debug);

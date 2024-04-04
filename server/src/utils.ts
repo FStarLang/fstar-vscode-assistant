@@ -10,7 +10,7 @@ import { pathToFileURL } from 'url';
 import * as fs from 'fs';
 import * as util from 'util';
 
-import { Server } from './server';
+import { DocumentState, Server } from './server';
 import { FStarPosition, FStarRange, IdeProofState, IdeProofStateContextualGoal, IdeLookupResponse } from './fstar_messages';
 
 ////////////////////////////////////////////////////////////////////////////////////
@@ -35,23 +35,6 @@ export function rangeAsFStarRange(rng: Range): FStarRange {
 		beg: posAsFStarPos(rng.start),
 		end: posAsFStarPos(rng.end),
 	};
-}
-
-export function qualifyFilename(fname: string, textdocUri: string, server: Server): string {
-	const doc_state = server.getDocumentState(textdocUri);
-	if (fname != "<input>") {
-		// if we have a relative path, then qualify it to the base of the
-		// F* process's cwd
-		const base = doc_state?.fstar.fstar_config().cwd;
-		if (!path.isAbsolute(fname) && base) {
-			//concate the base and the relative path
-			return pathToFileURL(path.join(base, fname)).toString();
-		}
-		else {
-			return pathToFileURL(fname).toString();
-		}
-	}
-	return textdocUri;
 }
 
 
