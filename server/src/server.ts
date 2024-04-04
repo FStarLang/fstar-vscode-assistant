@@ -32,7 +32,7 @@ import * as cp from 'child_process';
 import { defaultSettings, fstarVSCodeAssistantSettings } from './settings';
 import { formatIdeProofState, fstarRangeAsRange, mkPosition, qualifyFilename, rangeAsFStarRange } from './utils';
 import { ClientConnection } from './client_connection';
-import { FStarConnection, StreamedResult } from './fstar_connection';
+import { FStarConnection } from './fstar_connection';
 import { FStar } from './fstar';
 import { FStarRange, IdeProofState, IdeProgress, IdeDiagnostic, FullBufferQueryResponse } from './fstar_messages';
 import { handleIdeDiagnostics, handleIdeProgress, handleIdeProofState } from './fstar_handlers';
@@ -250,8 +250,7 @@ export class Server {
 		const fstar_conn = this.getFStarConnection(textDocument, lax);
 		if (!fstar_conn) { return; }
 
-		const response = fstar_conn.fullBufferRequest(textDocument.getText(), kind, withSymbols);
-		this.handleFullBufferResponse(response, textDocument, lax).catch(() => {});
+		fstar_conn.fullBufferRequest(textDocument.getText(), kind, withSymbols);
 	}
 
 	validateFStarDocumentToPosition(textDocument: TextDocument, kind: 'verify-to-position' | 'lax-to-position', position: { line: number, column: number }) {
@@ -279,27 +278,7 @@ export class Server {
 		const fstar_conn = this.getFStarConnection(textDocument, lax);
 		if (!fstar_conn) { return; }
 
-		const response = fstar_conn.partialBufferRequest(textDocument.getText(), kind, position);
-		this.handleFullBufferResponse(response, textDocument, lax).catch(() => {});
-	}
-
-	private async handleFullBufferResponse(promise: Promise<StreamedResult<FullBufferQueryResponse>>, textDocument: TextDocument, lax?: 'lax') {
-		let [response, next_promise] = await promise;
-
-		// full-buffer queries result in a stream of IdeProgress responses.
-		// These are returned as `StreamedResult` values which are essentially
-		// tuples with the next promise as the second element of the tuple. We
-		// therefore handle each of these progress messages here until there is
-		// no longer a next promise.
-		//
-		// TODO(klinvill): could add a nicer API to consume a streamed result
-		// without needing to continuously check next_promise.
-		while (next_promise) {
-			this.handleSingleFullBufferResponse(response, textDocument, lax);
-			// eslint-disable-next-line @typescript-eslint/no-floating-promises
-			[response, next_promise] = await next_promise;
-		}
-		this.handleSingleFullBufferResponse(response, textDocument, lax);
+		fstar_conn.partialBufferRequest(textDocument.getText(), kind, position);
 	}
 
 	private handleSingleFullBufferResponse(response: FullBufferQueryResponse, textDocument: TextDocument, lax?: 'lax') {
@@ -389,10 +368,12 @@ export class Server {
 		const fstar = FStarConnection.tryCreateFStarConnection(fstar_config, filePath,  this.configurationSettings.debug);
 		// Failed to start F*
 		if (!fstar) { return; }
+		fstar.onFullBufferResponse = res => this.handleSingleFullBufferResponse(res, textDocument);
 
 		const fstar_lax = FStarConnection.tryCreateFStarConnection(fstar_config, filePath,  this.configurationSettings.debug, 'lax');
 		// Failed to start F* lax
 		if (!fstar_lax) { return; }
+		fstar_lax.onFullBufferResponse = res => this.handleSingleFullBufferResponse(res, textDocument, 'lax');
 
 		// Initialize the document state for this doc
 		this.documentStates.set(textDocument.uri, {
@@ -660,7 +641,7 @@ export class Server {
 		// TODO(klinvill): It looks like this function can only be called for
 		// non-lax checking. Is that correct?
 		const fstar_conn = this.getFStarConnection(textDocument);
-		fstar_conn?.cancelRequest(range[0]);
+		fstar_conn?.cancelFBQ([range[0].line + 1, range[0].character]);
 	}
 
 	private async onKillAndRestartSolverRequest(uri: any) {
