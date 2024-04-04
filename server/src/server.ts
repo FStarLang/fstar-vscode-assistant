@@ -38,7 +38,7 @@ import { ClientConnection, StatusOkMessage, ok_kind } from './client_connection'
 import { FStarConnection } from './fstar_connection';
 import { FStar, FStarConfig } from './fstar';
 import { FStarRange, IdeProofState, IdeProgress, IdeDiagnostic, FullBufferQueryResponse } from './fstar_messages';
-import path = require('path');
+import * as path from 'path';
 import { pathToFileURL } from 'url';
 
 // LSP Server
@@ -50,7 +50,7 @@ import { pathToFileURL } from 'url';
 // allows for easier mocking out of these connections which in turn allows for
 // easier testing.
 export class Server {
-	documentStates: DocumentStates = new Map();
+	documentStates: Map<string, DocumentState> = new Map();
 	// Text document manager.
 	documents: TextDocuments<TextDocument>;
 	// All the open workspace folders
@@ -315,6 +315,10 @@ export class Server {
 	}
 }
 	
+interface WordAndRange {
+	word: string;
+	range: FStarRange;
+}
 // Find the word at the given position in the given document
 // (used to find the symbol under the cursor)
 function findWordAtPosition(doc: TextDocument, position: Position): WordAndRange {
@@ -857,11 +861,4 @@ export class DocumentState {
 		// standard F* solver (not the lax one), is this the desired behavior?
 		await this.getFStarConnection()?.restartSolver();
 	}
-}
-
-type DocumentStates = Map<string, DocumentState>
-
-interface WordAndRange {
-	word: string;
-	range: FStarRange;
 }

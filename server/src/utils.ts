@@ -1,16 +1,13 @@
 import {
-	Hover,
 	Position,
 	Range
 } from 'vscode-languageserver/node';
 
-import path = require('path');
-import { pathToFileURL } from 'url';
+import * as path from 'path';
 
 import * as fs from 'fs';
 import * as util from 'util';
 
-import { DocumentState, Server } from './server';
 import { FStarPosition, FStarRange, IdeProofState, IdeProofStateContextualGoal, IdeLookupResponse } from './fstar_messages';
 
 ////////////////////////////////////////////////////////////////////////////////////

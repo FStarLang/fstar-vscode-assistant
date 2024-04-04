@@ -3,10 +3,6 @@ import {
 } from 'vscode-languageserver/node';
 
 import {
-	TextDocument
-} from 'vscode-languageserver-textdocument';
-
-import {
 	URI
 } from 'vscode-uri';
 
@@ -14,7 +10,7 @@ import * as cp from 'child_process';
 import * as pstree from 'ps-tree';
 import * as which from 'which';
 import * as fs from 'fs';
-import path = require('path');
+import * as path from 'path';
 import * as util from 'util';
 
 import { fstarVSCodeAssistantSettings } from './settings';
@@ -72,7 +68,7 @@ export class FStar {
 		// check if fstar_exe can be found in the current path
 		// using which
 		try {
-			const fstar_exe_path = which.sync(config.fstar_exe);
+			which.sync(config.fstar_exe);
 		}
 		catch (err) {
 			throw new Error("Failed to find fstar.exe in path: " + err);
