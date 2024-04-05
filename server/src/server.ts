@@ -37,7 +37,7 @@ import { formatIdeProofState, fstarRangeAsRange, mkPosition, rangeAsFStarRange }
 import { ClientConnection, StatusOkMessage, ok_kind } from './client_connection';
 import { FStarConnection } from './fstar_connection';
 import { FStar, FStarConfig } from './fstar';
-import { FStarRange, IdeProofState, IdeProgress, IdeDiagnostic, FullBufferQueryResponse } from './fstar_messages';
+import { FStarRange, IdeProofState, IdeProgress, IdeDiagnostic, FullBufferQueryResponse, FStarPosition } from './fstar_messages';
 import * as path from 'path';
 import { pathToFileURL } from 'url';
 
@@ -104,11 +104,7 @@ export class Server {
 
 		this.documents.onDidSave(change => {
 			if (this.configurationSettings.verifyOnSave) {
-				const docState = this.getDocumentState(change.document.uri);
-				docState?.validateFStarDocument("full", false);
-				if (this.configurationSettings.flyCheck) {
-					docState?.validateFStarDocument("lax", true, "lax"); //retain flycheck markers for the suffix
-				}
+				this.getDocumentState(change.document.uri)?.verifyAll();
 			}
 		});
 
@@ -184,8 +180,8 @@ export class Server {
 
 		// FStarConnection objects store their own debug flag, so we need to update them all with the latest value.
 		this.documentStates.forEach((docState, uri) => {
-			if (docState.fstar) docState.fstar.debug = settings.debug;
-			if (docState.fstar_lax) docState.fstar_lax.debug = settings.debug;
+			docState.fstar.fstar.debug = settings.debug;
+			if (docState.fstar_lax) docState.fstar_lax.fstar.debug = settings.debug;
 		});
 	}
 
@@ -197,9 +193,10 @@ export class Server {
 		if (!doc || this.documentStates.has(uri)) return;
 
 		const fstar = FStarConnection.tryCreateFStarConnection(fstar_config, filePath, this.configurationSettings.debug);
-		const fstar_lax = FStarConnection.tryCreateFStarConnection(fstar_config, filePath,  this.configurationSettings.debug, 'lax');
+		if (!fstar) return;
+		const fstar_lax = this.configurationSettings.flyCheck ? FStarConnection.tryCreateFStarConnection(fstar_config, filePath, this.configurationSettings.debug, 'lax') : undefined;
 		
-		const docState = new DocumentState(doc, fstar_config, this, this.configurationSettings.flyCheck, fstar, fstar_lax);
+		const docState = new DocumentState(doc, fstar_config, this, fstar, fstar_lax);
 		this.documentStates.set(uri, docState);
 	}
 
@@ -283,13 +280,11 @@ export class Server {
 
 		// And ask the main fstar process to verify it
 		if (this.configurationSettings.verifyOnOpen) {
-			docState.validateFStarDocument("full", false);
+			docState.fstar.validateFStarDocument('full');
 		}
 
-		if (this.configurationSettings.flyCheck) {
-			// And ask the lax fstar process to verify it
-			docState.validateFStarDocument("lax", true, "lax");
-		}
+		// And ask the lax fstar process to verify it
+		docState.fstar_lax?.validateFStarDocument('lax');
 	}
 
 	private async onRestartRequest(uri: any) {
@@ -301,9 +296,7 @@ export class Server {
 		this.connection.sendStatusClear({ uri: textDocument.uri });
 		await this.refreshDocumentState(uri);
 		// And ask the lax fstar process to verify it
-		if (this.configurationSettings.flyCheck) {
-			this.getDocumentState(uri)?.validateFStarDocument("lax", false, "lax");
-		}
+		this.getDocumentState(uri)?.fstar_lax?.validateFStarDocument('lax');
 	}
 
 	private onKillAllRequest() {
@@ -340,15 +333,104 @@ function findWordAtPosition(doc: TextDocument, position: Position): WordAndRange
 
 export class DocumentState {
 	uri: string;
-	filePath: string;
 
 	// The main fstar.exe process for verifying the current document
-	fstar?: FStarConnection;
-	fstar_diagnostics: Diagnostic[] = [];
+	fstar: DocumentProcess;
 
 	// The fstar.exe process for quickly handling on-change events, symbol lookup etc
-	fstar_lax?: FStarConnection;
-	fstar_lax_diagnostics: Diagnostic[] = [];
+	// If flycheck is disabled, then we don't spawn the second process and this field is undefined.
+	fstar_lax?: DocumentProcess;
+
+	constructor(currentDoc: TextDocument,
+			public fstarConfig: FStarConfig,
+			public server: Server,
+			fstar: FStarConnection,
+			fstar_lax?: FStarConnection) {
+		this.uri = currentDoc.uri;
+		this.fstar = new DocumentProcess(currentDoc, fstarConfig, server, false, fstar);
+		this.fstar_lax = fstar_lax && new DocumentProcess(currentDoc, fstarConfig, server, true, fstar_lax);
+	}
+
+	dispose() {
+		this.fstar.dispose();
+		this.fstar_lax?.dispose();
+	}
+
+	changeDoc(newDoc: TextDocument) {
+		this.fstar.changeDoc(newDoc);
+		this.fstar_lax?.changeDoc(newDoc);
+	}
+
+	// Lookup the proof state table for the line at the cursor
+	findIdeProofStateAtLine(position: Position) {
+		return this.fstar.findIdeProofStateAtLine(position);
+	}
+
+	verifyAll() {
+		this.fstar.validateFStarDocument('full');
+		this.fstar_lax?.validateFStarDocument('lax');
+	}
+
+	verifyToPosition(position: Position) {
+		this.fstar.validateFStarDocumentToPosition('verify-to-position', { line: position.line + 1, column: position.character });
+		this.fstar_lax?.validateFStarDocument('lax');
+	}
+
+	laxToPosition(position: Position) {
+		this.fstar.validateFStarDocumentToPosition('lax-to-position', { line: position.line + 1, column: position.character });
+		this.fstar_lax?.validateFStarDocument('lax');
+	}
+
+	async onCompletion(textDocumentPosition: TextDocumentPositionParams): Promise<CompletionItem[] | undefined> {
+		return (this.fstar_lax ?? this.fstar).onCompletion(textDocumentPosition);
+	}
+
+	async onHover(textDocumentPosition: TextDocumentPositionParams): Promise<Hover | undefined> {
+		return (this.fstar_lax ?? this.fstar).onHover(textDocumentPosition);
+	}
+
+	// The onDefinition handler is called when the user clicks on a symbol
+	// It's very similar to the onHover handler, except that it returns a
+	// LocationLink object instead of a Hover object
+	async onDefinition(defParams: DefinitionParams): Promise<LocationLink[] | undefined> {
+		return (this.fstar_lax ?? this.fstar).onDefinition(defParams);
+	}
+
+	async onDocumentRangeFormatting(formatParams: DocumentRangeFormattingParams) {
+		return (this.fstar_lax ?? this.fstar).onDocumentRangeFormatting(formatParams);
+	}
+
+	onVerifyToPositionRequest(params: any) {
+		const position: { line: number, character: number } = params[1];
+		this.verifyToPosition(position);
+	}
+
+	onLaxToPositionRequest(params: any) {
+		const position: { line: number, character: number } = params[1];
+		this.laxToPosition(position);
+	}
+
+	onTextDocChanged(params: any) {
+		const range: { line: number; character: number }[] = params[1];
+		// TODO(klinvill): It looks like this function can only be called for
+		// non-lax checking. Is that correct?
+		const fstarPos: FStarPosition = [range[0].line + 1, range[0].character];
+		this.fstar?.fstar?.cancelFBQ(fstarPos);
+		this.fstar_lax?.fstar?.cancelFBQ(fstarPos);
+	}
+
+	async killAndRestartSolver() {
+		// TODO(klinvill): It looks like this function only restarts the
+		// standard F* solver (not the lax one), is this the desired behavior?
+		return this.fstar?.killAndRestartSolver();
+	}
+}
+
+export class DocumentProcess {
+	uri: string;
+	filePath: string;
+
+	fstar_diagnostics: Diagnostic[] = [];
 
 	// A proof-state table populated by fstar_ide when running tactics, displayed in onHover
 	hover_proofstate_info: Map<number, IdeProofState> = new Map();
@@ -363,28 +445,21 @@ export class DocumentState {
 	constructor(public currentDoc: TextDocument,
 			public fstarConfig: FStarConfig,
 			public server: Server,
-			public flyCheck: boolean,
-			fstar?: FStarConnection, fstar_lax?: FStarConnection) {
+			public lax: boolean,
+			public fstar: FStarConnection) {
 		this.uri = currentDoc.uri;
-		this.fstar = fstar;
-		this.fstar_lax = fstar_lax;
 		
 		this.filePath = URI.parse(this.uri).fsPath;
 
-		if (fstar) fstar.onFullBufferResponse = res => this.handleSingleFullBufferResponse(res);
-
-		if (fstar_lax) fstar_lax.onFullBufferResponse = res => this.handleSingleFullBufferResponse(res, 'lax');
+		fstar.onFullBufferResponse = res => this.handleSingleFullBufferResponse(res);
 
 		// Send the initial dummy vfs-add request to the fstar processes.
-		fstar?.vfsAddRequest(this.filePath, currentDoc.getText())
-			?.catch(e => console.error(`vfs-add request to F* process failed: ${e}`));
-		fstar_lax?.vfsAddRequest(this.filePath, currentDoc.getText())
-			?.catch(e => console.error(`vfs-add request to lax F* process failed: ${e}`));
+		fstar.vfsAddRequest(this.filePath, currentDoc.getText())
+			.catch(e => console.error(`vfs-add request to F* process failed: ${e}`));
 	}
 
 	dispose() {
-		this.fstar?.close();
-		this.fstar_lax?.close();
+		this.fstar.close();
 		clearTimeout(this.changeDispatcher);
 	}
 
@@ -395,10 +470,7 @@ export class DocumentState {
 		this.lastPendingChange = newDoc;
 		this.changeDispatcher = setTimeout(() => {
 			if (!this.lastPendingChange) return;
-			if (this.flyCheck) {
-				this.validateFStarDocument("lax", false, "lax");
-			}
-			this.validateFStarDocument("cache", false);
+			this.validateFStarDocument(this.lax ? 'lax' : 'cache');
 		}, 200);
 	}
 
@@ -424,13 +496,13 @@ export class DocumentState {
 	}
 
 	// Send a FullBufferQuery to validate the given document.
-	validateFStarDocument(kind: 'full' | 'lax' | 'cache' | 'reload-deps', withSymbols: boolean, lax?: 'lax') {
+	validateFStarDocument(kind: 'full' | 'lax' | 'cache' | 'reload-deps') {
 		// Clear pending change events, since we're checking it now
 		this.applyPendingChange();
 
 		this.connection.sendClearDiagnostics({ uri: this.uri });
 
-		if (!lax) {
+		if (!this.lax) {
 			// If this is non-lax requests, send a status clear messages to VSCode
 			// to clear the gutter icons and error squiggles
 			// They will be reported again if the document is not verified
@@ -440,10 +512,10 @@ export class DocumentState {
 			if (kind == "full") { this.connection.sendStatusStarted({ uri: this.uri, ranges: ranges }); }
 		}
 
-		this.getFStarConnection(lax)?.fullBufferRequest(this.currentDoc.getText(), kind, withSymbols);
+		this.fstar.fullBufferRequest(this.currentDoc.getText(), kind, false);
 	}
 
-	private validateFStarDocumentToPosition(kind: 'verify-to-position' | 'lax-to-position', position: { line: number, column: number }) {
+	validateFStarDocumentToPosition(kind: 'verify-to-position' | 'lax-to-position', position: { line: number, column: number }) {
 		// Clear pending change events, since we're checking it now
 		this.applyPendingChange();
 
@@ -452,23 +524,17 @@ export class DocumentState {
 		// If this is non-lax requests, send a status clear messages to VSCode
 		// to clear the gutter icons and error squiggles
 		// They will be reported again if the document is not verified
-		//
-		// TODO(klinvill): in `validateFStarDocument` this is done only for
-		// non-lax requests. Should a similar check be done here? The previous
-		// implementation of `validateFStarDocumentToPosition` implies that this
-		// function will never be called for lax requests. Is that true?
-		const lax = undefined;
 		this.prefix_stale = false;
 		this.connection.sendStatusClear({ uri: this.uri });
 		const ranges = [Range.create(mkPosition([0, 0]), mkPosition([position.line, 0]))];
 		this.connection.sendStatusStarted({ uri: this.uri, ranges: ranges });
 
-		this.getFStarConnection(lax)?.partialBufferRequest(this.currentDoc.getText(), kind, position);
+		this.fstar.partialBufferRequest(this.currentDoc.getText(), kind, position);
 	}
 
-	private handleSingleFullBufferResponse(response: FullBufferQueryResponse, lax?: 'lax') {
+	private handleSingleFullBufferResponse(response: FullBufferQueryResponse) {
 		if (response.kind === 'message' && response.level === 'progress') {
-			this.handleIdeProgress(response.contents as IdeProgress, lax === 'lax');
+			this.handleIdeProgress(response.contents as IdeProgress);
 		} else if (response.kind === 'message' && response.level === 'info') {
 			console.info("Info: " + response.contents);
 		} else if (response.kind === 'message' && response.level === 'error') {
@@ -486,7 +552,7 @@ export class DocumentState {
 			if (!response.response) {
 				console.info("Query cancelled");
 			} else if (Array.isArray(response.response)) {
-				this.handleIdeDiagnostics(response.response as IdeDiagnostic[], lax === 'lax');
+				this.handleIdeDiagnostics(response.response as IdeDiagnostic[]);
 			} else {
 				// ignore
 			}
@@ -499,7 +565,7 @@ export class DocumentState {
 		if (fname != "<input>") {
 			// if we have a relative path, then qualify it to the base of the
 			// F* process's cwd
-			const base = this.fstar?.fstar_config().cwd;
+			const base = this.fstar.fstar_config().cwd;
 			if (!path.isAbsolute(fname) && base) {
 				//concate the base and the relative path
 				return pathToFileURL(path.join(base, fname)).toString();
@@ -531,34 +597,20 @@ export class DocumentState {
 	//
 	// We use that to send a status-ok which will clear the hourglass icon
 	// and show a checkmark in the gutter for the locations we send
-	private handleIdeProgress(contents: IdeProgress, lax: boolean) {
+	private handleIdeProgress(contents: IdeProgress) {
 		if (contents.stage == "full-buffer-started") {
-			if (lax) {
-				this.fstar_lax_diagnostics = [];
-			}
-			else {
-				this.fstar_diagnostics = [];
-			}
+			this.fstar_diagnostics = [];
 			return;
 		}
 		if (contents.stage == "full-buffer-finished") {
-			if (lax) {
-				this.connection.sendDiagnostics({
-					uri: this.uri,
-					lax: true,
-					diagnostics: this.fstar_lax_diagnostics
-				});
-			}
-			else {
-				this.connection.sendDiagnostics({
-					uri: this.uri,
-					lax: false,
-					diagnostics: this.fstar_diagnostics
-				});
-			}
+			this.connection.sendDiagnostics({
+				uri: this.uri,
+				lax: this.lax,
+				diagnostics: this.fstar_diagnostics
+			});
 			return;
 		}
-		if (lax) { return; }
+		if (this.lax) { return; }
 		// We don't send intermediate diagnostics and gutter icons for flycheck progress
 		if (contents.stage == "full-buffer-fragment-ok" ||
 			contents.stage == "full-buffer-fragment-lax-ok") {
@@ -617,7 +669,7 @@ export class DocumentState {
 
 	// If we get errors and warnings from F*, we send them to VSCode as diagnostics,
 	// which will show them as squiggles in the editor.
-	private handleIdeDiagnostics(response: IdeDiagnostic[], lax: boolean) {
+	private handleIdeDiagnostics(response: IdeDiagnostic[]) {
 		function ideErrorLevelAsDiagnosticSeverity(level: string): DiagnosticSeverity {
 			switch (level) {
 				case "warning": return DiagnosticSeverity.Warning;
@@ -688,31 +740,14 @@ export class DocumentState {
 				diagnostics.push(diag);
 			}
 		});
-		if (lax) {
-			this.fstar_lax_diagnostics = this.fstar_lax_diagnostics.concat(diagnostics);
-		}
-		else {
-			this.fstar_diagnostics = this.fstar_diagnostics.concat(diagnostics);
-		}
-	}
-
-	// Get the FStarConnection instance for the given document
-	getFStarConnection(lax?: 'lax'): FStarConnection | undefined {
-		if (lax) {
-			return this.fstar_lax;
-		} else {
-			return this.fstar;
-		}
+		this.fstar_diagnostics = this.fstar_diagnostics.concat(diagnostics);
 	}
 
 	async onCompletion(textDocumentPosition: TextDocumentPositionParams): Promise<CompletionItem[] | undefined> {
 		const doc = this.lastPendingChange ?? this.currentDoc;
-		const lax = this.flyCheck ? 'lax' : undefined;
-		const conn = this.getFStarConnection(lax);
-		if (!conn) return;
 		const word = findWordAtPosition(doc, textDocumentPosition.position);
 		if (word.word.length < 2) return;
-		const response = await conn.autocompleteRequest(word.word);
+		const response = await this.fstar.autocompleteRequest(word.word);
 		if (response.status !== 'success') return;
 		const items: CompletionItem[] = [];
 		response.response.forEach(([matchLength, annotation, candidate]) => {
@@ -731,7 +766,6 @@ export class DocumentState {
 
 	async onHover(textDocumentPosition: TextDocumentPositionParams): Promise<Hover | undefined> {
 		const textDoc = this.lastPendingChange ?? this.currentDoc;
-		if (!textDoc) return;
 		// First, check if we have proof state information for this line
 		const proofState = this.findIdeProofStateAtLine(textDocumentPosition.position);
 		if (proofState) {
@@ -743,12 +777,9 @@ export class DocumentState {
 			};
 		}
 		// Otherwise, check the symbol information for this symbol
-		const lax = this.flyCheck ? 'lax' : undefined;
-		const conn = this.getFStarConnection(lax);
-		if (!conn) return;
 		const word = findWordAtPosition(textDoc, textDocumentPosition.position);
 		// The filename '<input>' here must be exactly the same the we used in the full buffer request.
-		const result = await conn.lookupQuery('<input>', textDocumentPosition.position, word.word);
+		const result = await this.fstar.lookupQuery('<input>', textDocumentPosition.position, word.word);
 		if (result.status !== 'success') return;
 		switch (result.response.kind) {
 			case 'symbol': return {
@@ -775,13 +806,9 @@ export class DocumentState {
 	// LocationLink object instead of a Hover object
 	async onDefinition(defParams: DefinitionParams): Promise<LocationLink[] | undefined> {
 		const textDoc = this.lastPendingChange ?? this.currentDoc;
-		if (!textDoc) { return []; }
-		const lax = this.flyCheck ? 'lax' : undefined;
-		const conn = this.getFStarConnection(lax);
-		if (!conn) return [];
 		const word = findWordAtPosition(textDoc, defParams.position);
 		// The filename '<input>' here must be exactly the same the we used in the full buffer request.
-		const result = await conn.lookupQuery('<input>', defParams.position, word.word);
+		const result = await this.fstar.lookupQuery('<input>', defParams.position, word.word);
 		if (result.status !== 'success') return [];
 		if (result.response.kind === 'symbol') {
 			const defined_at = result.response["defined-at"];
@@ -803,7 +830,6 @@ export class DocumentState {
 
 	async onDocumentRangeFormatting(formatParams: DocumentRangeFormattingParams) {
 		const textDoc = this.lastPendingChange ?? this.currentDoc;
-		if (!textDoc) { return []; }
 		const text = textDoc.getText(formatParams.range);
 		// call fstar.exe synchronously to format the text
 		const format_query = {
@@ -832,33 +858,7 @@ export class DocumentState {
 		return [TextEdit.replace(formatParams.range, formattedCode)];
 	}
 
-	onVerifyToPositionRequest(params: any) {
-		const position: { line: number, character: number } = params[1];
-		this.validateFStarDocumentToPosition("verify-to-position", { line: position.line + 1, column: position.character });
-		if (this.flyCheck) {
-			this.validateFStarDocument("lax", false, "lax"); //also flycheck, so we get status markers beyond the position too
-		}
-	}
-
-	onLaxToPositionRequest(params: any) {
-		const position: { line: number, character: number } = params[1];
-		this.validateFStarDocumentToPosition("lax-to-position", { line: position.line + 1, column: position.character });
-		if (this.flyCheck) {
-			this.validateFStarDocument("lax", false, "lax"); //also flycheck, so we get status markers beyond the position too
-		}
-	}
-
-	onTextDocChanged(params: any) {
-		const range: { line: number; character: number }[] = params[1];
-		// TODO(klinvill): It looks like this function can only be called for
-		// non-lax checking. Is that correct?
-		const fstar_conn = this.getFStarConnection();
-		fstar_conn?.cancelFBQ([range[0].line + 1, range[0].character]);
-	}
-
 	async killAndRestartSolver() {
-		// TODO(klinvill): It looks like this function only restarts the
-		// standard F* solver (not the lax one), is this the desired behavior?
-		await this.getFStarConnection()?.restartSolver();
+		await this.fstar.restartSolver();
 	}
 }
