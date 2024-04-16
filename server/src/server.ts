@@ -95,9 +95,12 @@ export class Server {
 		//  * spawn 2 fstar processes: one for typechecking, one lax process for fly-checking and symbol lookup
 		//  * set event handlers to read the output of the fstar processes
 		//  * send the current document to both processes to start typechecking
-		this.documents.onDidOpen(async e => {
-			await this.onOpenHandler(e.document);
-		});
+		this.documents.onDidOpen(ev =>
+			this.onOpenHandler(ev.document).catch(err =>
+				this.connection.sendAlert({
+					uri: ev.document.uri,
+					message: err.toString(),
+				})));
 
 		// Only keep settings for open documents
 		this.documents.onDidClose(e => {
