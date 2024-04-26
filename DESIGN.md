@@ -40,22 +40,6 @@ out of the box.
 
 # Main event handlers
 
-## Standard LSP Events
-
-### onInitialize
-
-Raised once, when the extension is initialized by the client.
-
-The servers reads the workspace configuration (.fst.config.json) if any,
-and sets up its state.
-
-* `const documentStates: Map<string, IDEState>`: A map from the URI of each open document
-   to the IDE state for it.
-
-* `const workspaceConfigs: Map<string, FStarConfig>`: A parsed .fst.config.json file, if any,
-   for all open workspace folders.
-
-
 ### onDidOpen
 
 server.ts launches two F* processes per open document:
@@ -64,14 +48,6 @@ server.ts launches two F* processes per open document:
 
 * `fstar_lax_ide`: This is used to handle on-the-fly checking, symbol resolution etc.
    Fragments of a document are only lax-checked by this F* process.
-
-### onDidChangeContent
-
-`fstar_lax_ide` is called to check the suffix of the document that has changed
-
-### onDidSave
-
-`fstar_ide` is called to fully check the suffix of the document that has not yet been checked.
 
 ### onHover
 
@@ -83,11 +59,7 @@ server.ts launches two F* processes per open document:
 
 ### onDocumentRangeFormatting
 
-Re-formatting a document selection is a synchronous event in LSP.
-However, interactions with `fstar_lax_ide` and `fstar_ide` are asychronous.
-
-Since re-formatting is a purely syntactic task and does not rely on any specific
-F* typechecker state, for this event, we spawn a new process fstar.exe synchronously, 
+We spawn a new process fstar.exe,
 and send it the `format` message with the content of the current selection, returning
 its result as the reformatted content.
 

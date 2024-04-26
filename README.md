@@ -3,28 +3,19 @@
 This VS Code extension provides support for interactively editing and
 checking F* files incrementally.
 
-It is adapted from the lsp-sample provided by VS Code:
-https://github.com/microsoft/vscode-extension-samples/tree/main/lsp-sample
-
-The vsfstar extension was also a source of inspiration and initial guidance:
-https://github.com/artagnon/vsfstar
-
 ## Installation
 
-An initial release is available on the VSCode marketplace: https://marketplace.visualstudio.com/items?itemName=FStarLang.fstar-vscode-assistant
+An release is available on the VSCode marketplace: https://marketplace.visualstudio.com/items?itemName=FStarLang.fstar-vscode-assistant
 
 You need to have a working F* installation, where `fstar.exe` and `z3` are in your path.
 
-Use the latest release of F* : https://github.com/FStarLang/FStar/releases/tag/v2023.04.25
-
+Use the latest release of F*: https://github.com/FStarLang/FStar/releases/tag/v2024.01.13
 
 If you have installed F* or Z3 using opam, make sure you start VS Code from inside the opam environment after running `eval $(opam env)`.
 If you are using WSL, the WSL plugin for VS Code will run your `bashrc`, and it is enough to put the `eval $(opam env)` there.
 (When only Z3 is missing, you will get a message like `ERROR: F* flycheck process exited with code 1`.)
 
-
 The command `fstar.exe --ide A.fst` should print the following protocol-info (Look at the full strig, it ends with ""full-buffer","format","restart-solver", "cancel"]}".
-
 
 ```json
 {"kind":"protocol-info","version":2,"features":["autocomplete","autocomplete/context","compute","compute/reify","compute/pure-subterms","describe-protocol","describe-repl","exit","lookup","lookup/context","lookup/documentation","lookup/definition","peek","pop","push","search","segment","vfs-add","tactic-ranges","interrupt","progress","full-buffer","format","restart-solver", "cancel"]}
@@ -144,15 +135,13 @@ highlighted with "squigglies" in the document.
 
 You can hover on an identifer to see its type.
 
-Note, the first time you hover on an identifer, you may see a message "Loading symbol: ..."
+If F* can resolve the symbol, you should see its fully qualified name and type.
 
-If F* can resolve the symbol, the next time you hover on it, you should see its fully qualified name and type.
-
-You can also jump to the definition, using the menu option or by pressing F12.
+You can also jump to the definition, using ctrl+click or by pressing F12.
 
 ### Proof state dumps for tactic execution
 
-If you are using tactics, you can hover on tactic line to see the last proof state dumped at that line
+If you are using tactics, you can hover on tactic line to see the last proof state dumped at that line.
 
 ### Completions
 
@@ -207,7 +196,7 @@ If you have a .fst.config.json file in a folder, you can open the folder as a wo
 and all F* files in that workspace using the .fst.config.json file as the configuration
 for launching `fstar.exe`. Here is a sample .fst.config.json file:
 
-```
+```json
 { "fstar_exe":"fstar.exe",
   "options":["--cache_dir", ".cache.boot", "--no_location_info", "--warn_error", "-271-272-241-319-274"],
   "include_dirs":["../ulib", "basic", "basic/boot", "extraction", "fstar", "parser", "prettyprint", "prettyprint/boot", "reflection", "smtencoding", "syntax", "tactics", "tosyntax", "typechecker", "tests", "tests/boot"] }
@@ -252,8 +241,6 @@ workspace_root/
 
 Then, `Project.fst.config.json` applies to `Main.fst` and `A.fst`,
 while `B.fst.config.json` applies to `B.fst`.
-
-
 
 
 ### Working with the vscode remote ssh extension
@@ -339,8 +326,6 @@ Also, a disclaimer: This is my first non-trivial VSCode extension and I may well
 conventions that extension users may expect. Any contributions or suggestions to bring it more in
 line with existing conventions are most welcome.
 
-Also, I have been using this extension myself only for the past couple of weeks, while developing it. 
-
 ## Running it in development mode
 
 - Run `npm install` in this folder. This installs all necessary npm
@@ -350,21 +335,9 @@ Also, I have been using this extension myself only for the past couple of weeks,
 
 - Open VS Code on this folder.
 
-- Press Ctrl+Shift+B to start compiling the client and server in
-  [watch
-  mode](https://code.visualstudio.com/docs/editor/tasks#:~:text=The%20first%20entry%20executes,the%20HelloWorld.js%20file.).
+- Press F5 to build the extension and run it in a new vscode window with the built extension.
 
-- Switch to the Run and Debug View in the Sidebar (Ctrl+Shift+D).
+## Acknowledgements
 
-- Select `Launch Client` from the drop down (if it is not already).
-
-- Press ▷ to run the launch config (F5).
-
-- In the [Extension Development
-  Host](https://code.visualstudio.com/api/get-started/your-first-extension#:~:text=Then%2C%20inside%20the%20editor%2C%20press%20F5.%20This%20will%20compile%20and%20run%20the%20extension%20in%20a%20new%20Extension%20Development%20Host%20window.)
-  instance of VSCode, open a document with a `.fst` or `.fsti` filename extension.
-
-  - You should see some syntax highlighting
-  - And, as you type, you should see F* checking your code and providing diagnostics interactively
-
-- You might also want to read DESIGN.md, if you want to contribute.
+The vsfstar extension was also a source of inspiration and initial guidance:
+https://github.com/artagnon/vsfstar
