@@ -280,28 +280,26 @@ export class FStarConnection {
 		// responses to a query we sent.
 		if (isProtocolInfo(msg)) {
 			this.handleProtocolInfo(msg as ProtocolInfo);
-		} else if (this.fullBufferInProgress) {
-			const r = msg as IdeResponseBase;
-			// Note: responses to full-buffer queries are sent with query ids
-			// with non-strictly incrementing fractional components. E.g. if the
-			// query id is 2, the responses can come back with query ids 2, 2.1,
-			// 2.1, 2.1, 2.2, 2.3, etc. To get the corresponding request ID, we
-			// simply truncate the responses query-id.
-			const qid = '' + Math.trunc(Number(r["query-id"]));
-			if (qid !== this.fullBufferInProgress.currentReq['query-id']) {
-				console.warn('Ill-formed response to full buffer query:', r);
-				return;
-			}
+			return;
+		}
 
+		const r = msg as IdeResponseBase;
+		// Note: responses to full-buffer queries are sent with query ids
+		// with non-strictly incrementing fractional components. E.g. if the
+		// query id is 2, the responses can come back with query ids 2, 2.1,
+		// 2.1, 2.1, 2.2, 2.3, etc. To get the corresponding request ID, we
+		// simply truncate the responses query-id.
+		function removeDotAndRest(q: string) {
+			const i = q.indexOf('.');
+			return i < 0 ? q : q.slice(0, i);
+		}
+		const qid = removeDotAndRest(r["query-id"]);
+
+		// We might get responses to other requests even when a full-buffer request is in progress,
+		// if those requests were issued before the full-buffer request.
+		if (this.fullBufferInProgress && qid === this.fullBufferInProgress.currentReq['query-id']) {
 			this.handleFBQResponse(r);
 		} else {
-			const r = msg as IdeResponseBase;
-			const qid = r["query-id"];
-			if (!qid) {
-				console.warn('Ill-formed query response message:', r);
-				return;
-			}
-
 			this.respond(qid, r);
 		}
 	}
