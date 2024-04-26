@@ -291,7 +291,7 @@ function handleDidChangeActiveEditor(editor? : vscode.TextEditor) {
 	setActiveEditorDecorationsIfUriMatches(editor.document.uri.toString());
 }
 
-export function activate(context: ExtensionContext) {
+export async function activate(context: ExtensionContext) {
 	// The server is implemented in node
 	const serverModule = context.asAbsolutePath(
 		path.join('server', 'out', 'main.js')
@@ -325,16 +325,14 @@ export function activate(context: ExtensionContext) {
 		clientOptions
 	);
 	
-	client.onReady().then(() => {
-		client.onNotification('fstar-vscode-assistant/statusOk', handleStatusOk);
-		client.onNotification('fstar-vscode-assistant/statusClear', handleStatusClear);
-		client.onNotification('fstar-vscode-assistant/statusStarted', handleStatusStarted);
-		client.onNotification('fstar-vscode-assistant/statusInProgress', handleStatusInProgress);
-		client.onNotification('fstar-vscode-assistant/statusFailed', handleStatusFailed);
-		client.onNotification('fstar-vscode-assistant/alert', handleAlert);
-		client.onNotification('fstar-vscode-assistant/diagnostics', handleDiagnostics);
-		client.onNotification('fstar-vscode-assistant/clearDiagnostics', handleClearDiagnostics);
-	}).catch(() => {});
+	client.onNotification('fstar-vscode-assistant/statusOk', handleStatusOk);
+	client.onNotification('fstar-vscode-assistant/statusClear', handleStatusClear);
+	client.onNotification('fstar-vscode-assistant/statusStarted', handleStatusStarted);
+	client.onNotification('fstar-vscode-assistant/statusInProgress', handleStatusInProgress);
+	client.onNotification('fstar-vscode-assistant/statusFailed', handleStatusFailed);
+	client.onNotification('fstar-vscode-assistant/alert', handleAlert);
+	client.onNotification('fstar-vscode-assistant/diagnostics', handleDiagnostics);
+	client.onNotification('fstar-vscode-assistant/clearDiagnostics', handleClearDiagnostics);
 	vscode.window.onDidChangeActiveTextEditor(handleDidChangeActiveEditor);
 
 	// register a command for Ctrl+.
@@ -406,9 +404,7 @@ export function activate(context: ExtensionContext) {
 		};
 	});
 
-	// Start the client. This will also launch the server
-	context.subscriptions.push(client.start());
-
+	await client.start();
 }
 
 export function deactivate(): Thenable<void> | undefined {

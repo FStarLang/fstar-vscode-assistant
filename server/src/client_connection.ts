@@ -23,36 +23,35 @@ export class ClientConnection {
 	}
 
 	sendStatusStarted(msg: StatusStartedMessage) {
-		this.conn.sendNotification('fstar-vscode-assistant/statusStarted', msg);
+		void this.conn.sendNotification('fstar-vscode-assistant/statusStarted', msg);
 	}
 
 	sendStatusInProgress(msg: StatusInProgressMessage) {
-		this.conn.sendNotification('fstar-vscode-assistant/statusInProgress', msg);
+		void this.conn.sendNotification('fstar-vscode-assistant/statusInProgress', msg);
 	}
 
 	sendStatusOk(msg: StatusOkMessage) {
-		this.conn.sendNotification('fstar-vscode-assistant/statusOk', msg);
+		void this.conn.sendNotification('fstar-vscode-assistant/statusOk', msg);
 	}
 
 	sendStatusFailed(msg: StatusFailedMessage) {
-		this.conn.sendNotification('fstar-vscode-assistant/statusFailed', msg);
+		void this.conn.sendNotification('fstar-vscode-assistant/statusFailed', msg);
 	}
 
 	sendStatusClear(msg: StatusClearMessage) {
-		this.conn.sendNotification('fstar-vscode-assistant/statusClear', msg);
+		void this.conn.sendNotification('fstar-vscode-assistant/statusClear', msg);
 	}
 
 	sendAlert(msg: AlertMessage) {
-		this.conn.sendNotification('fstar-vscode-assistant/alert', msg);
+		void this.conn.sendNotification('fstar-vscode-assistant/alert', msg);
 	}
 
 	sendDiagnostics(msg: DiagnosticsMessage) {
-		this.conn.sendNotification('fstar-vscode-assistant/diagnostics', msg);
+		void this.conn.sendNotification('fstar-vscode-assistant/diagnostics', msg);
 	}
 
 	sendClearDiagnostics(msg: ClearDiagnosticsMessage) {
-
-		this.conn.sendNotification('fstar-vscode-assistant/clearDiagnostics', msg);
+		void this.conn.sendNotification('fstar-vscode-assistant/clearDiagnostics', msg);
 	}
 }
 
