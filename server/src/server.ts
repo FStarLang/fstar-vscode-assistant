@@ -426,6 +426,10 @@ export class DocumentState {
 	}
 }
 
+function isDummyRange(range: FStarRange): boolean {
+	return range.fname === 'dummy';
+}
+
 export class DocumentProcess {
 	uri: string;
 	filePath: string;
@@ -812,6 +816,11 @@ export class DocumentProcess {
 		if (result.status !== 'success') return [];
 		if (result.response.kind === 'symbol') {
 			const defined_at = result.response["defined-at"];
+			if (isDummyRange(defined_at)) {
+				// Spliced definitions currently have dummy ranges
+				// https://github.com/FStarLang/fstar-vscode-assistant/issues/37
+				return;
+			}
 			const range = fstarRangeAsRange(defined_at);
 			return [{
 				targetUri: this.qualifyFilename(defined_at.fname, textDoc.uri),
