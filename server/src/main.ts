@@ -3,21 +3,22 @@
  * Licensed under the MIT License. See License.txt in the project root for license information.
  * ------------------------------------------------------------------------------------------ */
 import {
-	TextDocuments
+	ProposedFeatures,
+	TextDocuments,
+	createConnection,
 } from 'vscode-languageserver/node';
 
 import {
 	TextDocument
 } from 'vscode-languageserver-textdocument';
 
-import { ClientConnection } from './client_connection';
 import { Server } from './server';
 
 // Make unhandled rejections non-fatal
 process.on('unhandledRejection', error => console.log('Unhandled rejection:', error));
 
 // Connection between the LSP server and client (e.g. the extension)
-const connection = new ClientConnection();
+const connection = createConnection(ProposedFeatures.all);
 // Simple text document manager.
 const documents = new TextDocuments(TextDocument);
 

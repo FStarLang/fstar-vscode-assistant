@@ -16,9 +16,8 @@ import {
 	LocationLink,
 	DocumentRangeFormattingParams,
 	TextEdit,
-	_Connection,
+	Connection,
 	DiagnosticSeverity,
-	DiagnosticRelatedInformation
 } from 'vscode-languageserver/node';
 
 import {
@@ -30,22 +29,22 @@ import {
 } from 'vscode-uri';
 
 import * as cp from 'child_process';
-import * as crypto from 'crypto';
 
 import { defaultSettings, fstarVSCodeAssistantSettings } from './settings';
-import { formatIdeProofState, fstarRangeAsRange, mkPosition, rangeAsFStarRange } from './utils';
-import { ClientConnection, StatusOkMessage, ok_kind } from './client_connection';
+import { formatIdeProofState, fstarPosLe, fstarRangeAsRange, mkPosition, posAsFStarPos, posLe, rangeAsFStarRange } from './utils';
 import { FStarConnection } from './fstar_connection';
 import { FStar, FStarConfig } from './fstar';
-import { FStarRange, IdeProofState, IdeProgress, IdeDiagnostic, FullBufferQueryResponse, FStarPosition } from './fstar_messages';
+import { FStarRange, IdeProofState, IdeProgress, IdeDiagnostic, FullBufferQueryResponse, FStarPosition, FullBufferQuery } from './fstar_messages';
 import * as path from 'path';
 import { pathToFileURL } from 'url';
+import { statusNotification, FragmentStatus, killAndRestartSolverNotification, restartNotification, verifyToPositionNotification, killAllNotification } from './fstarLspExtensions';
+import { Debouncer, RateLimiter } from './signals';
 
 // LSP Server
 //
 // The LSP Server interfaces with both the Client (e.g. the vscode extension)
 // and the F* processes that are used to check files. It is started run using
-// the `server.run()` method. The `ClientConnection` and text document manager
+// the `server.run()` method. The `Connection` and text document manager
 // are passed in as arguments, following the dependency injection pattern. This
 // allows for easier mocking out of these connections which in turn allows for
 // easier testing.
@@ -57,14 +56,14 @@ export class Server {
 	workspaceFolders: WorkspaceFolder[] = [];
 	configurationSettings: fstarVSCodeAssistantSettings = defaultSettings;
 	// Connection to the client (the extension in the IDE)
-	connection: ClientConnection;
+	connection: Connection;
 
 	// Client (e.g. extension) capabilities
 	hasConfigurationCapability: boolean = false;
 	hasWorkspaceFolderCapability: boolean = false;
 	hasDiagnosticRelatedInformationCapability: boolean = false;
 
-	constructor(connection: ClientConnection, documents: TextDocuments<TextDocument>) {
+	constructor(connection: Connection, documents: TextDocuments<TextDocument>) {
 		this.documents = documents;
 		this.connection = connection;
 
@@ -74,27 +73,15 @@ export class Server {
 		//  * set event handlers to read the output of the fstar processes
 		//  * send the current document to both processes to start typechecking
 		this.documents.onDidOpen(ev =>
-			this.onOpenHandler(ev.document).catch(err =>
-				this.connection.sendAlert({
-					uri: ev.document.uri,
-					message: err.toString(),
-				})));
+			this.onOpenHandler(ev.document)
+				.catch(err => this.connection.window.showErrorMessage(
+					`${URI.parse(ev.document.uri).fsPath}: ${err.toString()}`))
+				.catch());
 
 		// Only keep settings for open documents
 		this.documents.onDidClose(e => {
 			this.documentStates.get(e.document.uri)?.dispose();
 			this.documentStates.delete(e.document.uri);
-			// Clear all diagnostics for a document when it is closed
-			this.connection.sendDiagnostics({
-				uri: e.document.uri,
-				lax: true,
-				diagnostics: []
-			});
-			this.connection.sendDiagnostics({
-				uri: e.document.uri,
-				lax: false,
-				diagnostics: []
-			});
 		});
 
 		// The content of a text document has changed. This event is emitted
@@ -117,62 +104,54 @@ export class Server {
 		// https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/thiscallbacks
 		// for the official documentation on this behavior, and
 		// https://javascript.info/bind for another explanation.
-		this.connection.conn.onInitialize(params => this.onInitialize(params));
-		this.connection.conn.onInitialized(() => this.onInitializedHandler());
+		this.connection.onInitialize(params => this.onInitialize(params));
+		this.connection.onInitialized(() => this.onInitializedHandler());
 		// We don't do anything special when the configuration changes
-		this.connection.conn.onDidChangeConfiguration(async _change => {
-			await this.updateConfigurationSettings();
-		});
-		this.connection.conn.onDidChangeWatchedFiles(_change => {
-			// Monitored files have change in VSCode
-			// connection.console.log('We received an file change event');
-		});
-		this.connection.conn.onCompletion(textDocumentPosition =>
+		this.connection.onDidChangeConfiguration(() => this.updateConfigurationSettings());
+		this.connection.onCompletion(textDocumentPosition =>
 			this.getDocumentState(textDocumentPosition.textDocument.uri)?.onCompletion(textDocumentPosition));
 		// This handler resolves additional information for the item selected in
 		// the completion list.
-		this.connection.conn.onCompletionResolve(item => item);
-		this.connection.conn.onHover(textDocumentPosition =>
+		this.connection.onCompletionResolve(item => item);
+		this.connection.onHover(textDocumentPosition =>
 			this.getDocumentState(textDocumentPosition.textDocument.uri)?.onHover(textDocumentPosition));
-		this.connection.conn.onDefinition(defParams =>
+		this.connection.onDefinition(defParams =>
 			this.getDocumentState(defParams.textDocument.uri)?.onDefinition(defParams));
-		this.connection.conn.onDocumentRangeFormatting(formatParams =>
+		this.connection.onDocumentRangeFormatting(formatParams =>
 			this.getDocumentState(formatParams.textDocument.uri)?.onDocumentRangeFormatting(formatParams));
 
 		// Custom events
-		this.connection.conn.onRequest("fstar-vscode-assistant/verify-to-position", params =>
-			this.getDocumentState(params[0])?.onVerifyToPositionRequest(params));
-		this.connection.conn.onRequest("fstar-vscode-assistant/lax-to-position", params =>
-			this.getDocumentState(params[0])?.onLaxToPositionRequest(params));
-		this.connection.conn.onRequest("fstar-vscode-assistant/restart", uri =>
+		this.connection.onNotification(verifyToPositionNotification, ({uri, position, lax}) => {
+			const state = this.getDocumentState(uri);
+			if (lax) {
+				state?.laxToPosition(position);
+			} else {
+				state?.verifyToPosition(position);
+			}
+		});
+		this.connection.onNotification(restartNotification, ({uri}) =>
 			this.onRestartRequest(uri));
-		this.connection.conn.onRequest("fstar-vscode-assistant/text-doc-changed", params =>
-			this.getDocumentState(params[0])?.onTextDocChanged(params));
-		this.connection.conn.onRequest("fstar-vscode-assistant/kill-and-restart-solver", uri =>
+		this.connection.onNotification(killAndRestartSolverNotification, ({uri}) =>
 			this.getDocumentState(uri)?.killAndRestartSolver());
-		this.connection.conn.onRequest("fstar-vscode-assistant/kill-all", params =>
+		this.connection.onNotification(killAllNotification, () =>
 			this.onKillAllRequest());
 	}
 
 	run() {
 		// Make the text document manager listen on the connection
 		// for open, change and close text document events
-		this.documents.listen(this.connection.conn);
+		this.documents.listen(this.connection);
 
 		// Listen on the connection
-		this.connection.conn.listen();
+		this.connection.listen();
 	}
 
 	getDocumentState(uri: string): DocumentState | undefined {
 		return this.documentStates.get(uri);
 	}
 
-	getDocument(uri: string): TextDocument | undefined {
-		return this.documents.get(uri);
-	}
-
 	async updateConfigurationSettings() {
-		const settings = await this.connection.conn.workspace.getConfiguration('fstarVSCodeAssistant');
+		const settings = await this.connection.workspace.getConfiguration('fstarVSCodeAssistant');
 		if (settings.debug) {
 			console.log("Server got settings: " + JSON.stringify(settings));
 		}
@@ -195,7 +174,7 @@ export class Server {
 		const fstar = FStarConnection.tryCreateFStarConnection(fstar_config, filePath, this.configurationSettings.debug);
 		if (!fstar) return;
 		const fstar_lax = this.configurationSettings.flyCheck ? FStarConnection.tryCreateFStarConnection(fstar_config, filePath, this.configurationSettings.debug, 'lax') : undefined;
-		
+
 		const docState = new DocumentState(doc, fstar_config, this, fstar, fstar_lax);
 		this.documentStates.set(uri, docState);
 	}
@@ -255,17 +234,17 @@ export class Server {
 		await this.updateConfigurationSettings();
 		if (this.hasConfigurationCapability) {
 			// Register for all configuration changes.
-			await this.connection.conn.client.register(DidChangeConfigurationNotification.type, undefined);
+			await this.connection.client.register(DidChangeConfigurationNotification.type, undefined);
 			// const settings = connection.workspace.getConfiguration('fstarVSCodeAssistant');
 			// const settings = connection.workspace.getConfiguration();
 			// console.log("Server got settings: " + JSON.stringify(settings));
 		}
 		if (this.hasWorkspaceFolderCapability) {
-			this.connection.conn.workspace.onDidChangeWorkspaceFolders(_event => {
+			this.connection.workspace.onDidChangeWorkspaceFolders(_event => {
 				// We don't do anything special when workspace folders change
 				// We should probably reset the workspace configs and re-read the .fst.config.json files
 				if (this.configurationSettings.debug) {
-					this.connection.conn.console.log('Workspace folder change event received.');
+					this.connection.console.log('Workspace folder change event received.');
 				}
 			});
 		}
@@ -287,13 +266,10 @@ export class Server {
 		docState.fstar_lax?.validateFStarDocument('lax');
 	}
 
-	private async onRestartRequest(uri: any) {
-		// console.log("Received restart request with parameters: " + uri);
-		const textDocument = this.getDocument(uri);
-		if (!textDocument) return;
+	private async onRestartRequest(uri: string) {
+		if (!this.documents.get(uri)) return;
 		this.documentStates.get(uri)?.dispose();
 		this.documentStates.delete(uri);
-		this.connection.sendStatusClear({ uri: textDocument.uri });
 		await this.refreshDocumentState(uri);
 		// And ask the lax fstar process to verify it
 		this.getDocumentState(uri)?.fstar_lax?.validateFStarDocument('lax');
@@ -341,19 +317,32 @@ export class DocumentState {
 	// If flycheck is disabled, then we don't spawn the second process and this field is undefined.
 	fstar_lax?: DocumentProcess;
 
+	private disposed = false;
+
 	constructor(currentDoc: TextDocument,
 			public fstarConfig: FStarConfig,
 			public server: Server,
 			fstar: FStarConnection,
 			fstar_lax?: FStarConnection) {
 		this.uri = currentDoc.uri;
-		this.fstar = new DocumentProcess(currentDoc, fstarConfig, server, false, fstar);
-		this.fstar_lax = fstar_lax && new DocumentProcess(currentDoc, fstarConfig, server, true, fstar_lax);
+		this.fstar = new DocumentProcess(currentDoc, fstarConfig, this, false, fstar);
+		this.fstar_lax = fstar_lax && new DocumentProcess(currentDoc, fstarConfig, this, true, fstar_lax);
 	}
 
 	dispose() {
+		this.disposed = true;
 		this.fstar.dispose();
 		this.fstar_lax?.dispose();
+
+		// Clear all diagnostics for a document when it is closed
+		void this.server.connection.sendDiagnostics({
+			uri: this.uri,
+			diagnostics: [],
+		});
+		void this.server.connection.sendNotification(statusNotification, {
+			uri: this.uri,
+			fragments: [],
+		});
 	}
 
 	changeDoc(newDoc: TextDocument) {
@@ -372,12 +361,12 @@ export class DocumentState {
 	}
 
 	verifyToPosition(position: Position) {
-		this.fstar.validateFStarDocumentToPosition('verify-to-position', { line: position.line + 1, column: position.character });
+		this.fstar.validateFStarDocumentToPosition('verify-to-position', position);
 		this.fstar_lax?.validateFStarDocument('lax');
 	}
 
 	laxToPosition(position: Position) {
-		this.fstar.validateFStarDocumentToPosition('lax-to-position', { line: position.line + 1, column: position.character });
+		this.fstar.validateFStarDocumentToPosition('lax-to-position', position);
 		this.fstar_lax?.validateFStarDocument('lax');
 	}
 
@@ -400,62 +389,145 @@ export class DocumentState {
 		return (this.fstar_lax ?? this.fstar).onDocumentRangeFormatting(formatParams);
 	}
 
-	onVerifyToPositionRequest(params: any) {
-		const position: { line: number, character: number } = params[1];
-		this.verifyToPosition(position);
-	}
-
-	onLaxToPositionRequest(params: any) {
-		const position: { line: number, character: number } = params[1];
-		this.laxToPosition(position);
-	}
-
-	onTextDocChanged(params: any) {
-		const range: { line: number; character: number }[] = params[1];
-		// TODO(klinvill): It looks like this function can only be called for
-		// non-lax checking. Is that correct?
-		const fstarPos: FStarPosition = [range[0].line + 1, range[0].character];
-		this.fstar?.fstar?.cancelFBQ(fstarPos);
-		this.fstar_lax?.fstar?.cancelFBQ(fstarPos);
-	}
-
 	async killAndRestartSolver() {
 		// TODO(klinvill): It looks like this function only restarts the
 		// standard F* solver (not the lax one), is this the desired behavior?
 		return this.fstar?.killAndRestartSolver();
 	}
+
+	sendDiags() { this.diagnosticsRateLimiter.fire(); }
+	diagnosticsRateLimiter = new RateLimiter(100, () => {
+		if (this.disposed) return;
+
+		const diags =
+			[...this.fstar.results.diagnostics, ...this.fstar.results.outOfBandErrors];
+
+		if (this.fstar_lax) {
+			// Add diagnostics from the lax position that are after the part processed by the full process.
+			const lastPos = mkPosition(this.fstar.results.fragments.findLast(f => !f.invalidatedThroughEdits && f.ok !== undefined)?.range?.end || [1, 1]);
+			diags.push(...this.fstar_lax.results.diagnostics.filter(d => posLe(lastPos, d.range.start)));
+		}
+
+		void this.server.connection.sendDiagnostics({
+			uri: this.uri,
+			diagnostics: diags,
+		});
+	});
+
+	sendStatus() { this.statusRateLimiter.fire(); }
+	private statusRateLimiter = new RateLimiter(100, () => {
+		if (this.disposed) return;
+
+		const fragments = [...this.fstar.results.fragments];
+
+		// TODO: augment with lax process status
+
+		const statusFragments: FragmentStatus[] = [];
+		for (const frag of fragments) {
+			if (frag.invalidatedThroughEdits && frag.ok !== undefined) continue;
+			statusFragments.push({
+				range: fstarRangeAsRange(frag.range),
+				kind:
+					frag.ok === undefined ? 'in-progress' :
+					!frag.ok ? 'failed' :
+					frag.lax ? 'lax-ok' : 'ok',
+			});
+		}
+
+		const lastPos = mkPosition(this.fstar.results.fragments.at(-1)?.range?.end ?? [1, 0]);
+		if (this.fstar.startedProcessingToPosition) {
+			statusFragments.push({
+				range: { start: lastPos, end: this.fstar.startedProcessingToPosition },
+				kind: 'started',
+			});
+		}
+
+		void this.server.connection.sendNotification(statusNotification, {
+			uri: this.uri,
+			fragments: statusFragments,
+		});
+	});
 }
 
 function isDummyRange(range: FStarRange): boolean {
 	return range.fname === 'dummy';
 }
 
+interface FragmentResult {
+	range: FStarRange;
+	ok?: boolean; // undefined means in progress
+	lax?: boolean;
+	invalidatedThroughEdits: boolean;
+}
+
+interface DocumentResults {
+	fragments: FragmentResult[];
+	diagnostics: Diagnostic[];
+	proofStates: IdeProofState[];
+	outOfBandErrors: Diagnostic[];
+	invalidAfter?: Position;
+	sourceText: string;
+}
+function emptyResults(sourceText: string): DocumentResults {
+	return {
+		fragments: [],
+		diagnostics: [],
+		proofStates: [],
+		outOfBandErrors: [],
+		sourceText,
+	};
+}
+
+function invalidateResults(results: DocumentResults, newDoc: TextDocument) {
+	const diffOff = findFirstDiffPos(results.sourceText, newDoc.getText());
+	if (!diffOff) return;
+	const diffPos = newDoc.positionAt(diffOff);
+	if (results.invalidAfter && posLe(results.invalidAfter, diffPos)) return;
+	results.invalidAfter = diffPos;
+	for (const frag of results.fragments) {
+		if (!posLe(mkPosition(frag.range.end), diffPos)) {
+			frag.invalidatedThroughEdits = true;
+		}
+	}
+}
+
+function findFirstDiffPos(a: string, b: string): undefined | number {
+	let i = 0;
+	while (i < a.length && i < b.length && a[i] === b[i]) i++;
+	return i === a.length && i === b.length ? undefined : i;
+}
+
 export class DocumentProcess {
 	uri: string;
 	filePath: string;
 
-	fstar_diagnostics: Diagnostic[] = [];
+	// Diagnostics, proof states, ranges of checked fragments, etc.
+	results: DocumentResults = emptyResults('');
+	// Full-buffer queries start out by "replaying" diagnostics from already checked fragments.
+	// During this phase we buffer these in newResults to avoid flickering.
+	// We switch the buffers when the first fragment is being processed.
+	private newResults?: DocumentResults;
+	// When a full-buffer query is in progress, startedProcessingToPosition contains the end-position
+	startedProcessingToPosition?: Position;
 
-	// A proof-state table populated by fstar_ide when running tactics, displayed in onHover
-	hover_proofstate_info: Map<number, IdeProofState> = new Map();
-	// A flag to indicate if the prefix of the buffer is stale
-	prefix_stale: boolean = false;
-	
 	// We don't want to send too many requests to fstar.exe, so we batch them up
 	// and send only the most recent one.
-	lastPendingChange?: TextDocument;
-	changeDispatcher?: NodeJS.Timeout;
+	// currentDoc is always the current editor document (it is updated in place!)
+	pendingChange: boolean = false;
+	lastDocumentSentToFStar: string;
 	
 	constructor(public currentDoc: TextDocument,
 			public fstarConfig: FStarConfig,
-			public server: Server,
+			public documentState: DocumentState,
 			public lax: boolean,
 			public fstar: FStarConnection) {
 		this.uri = currentDoc.uri;
 		
 		this.filePath = URI.parse(this.uri).fsPath;
 
-		fstar.onFullBufferResponse = res => this.handleSingleFullBufferResponse(res);
+		this.lastDocumentSentToFStar = currentDoc.getText();
+
+		fstar.onFullBufferResponse = (res, q) => this.handleSingleFullBufferResponse(res, q);
 
 		// Send the initial dummy vfs-add request to the fstar processes.
 		fstar.vfsAddRequest(this.filePath, currentDoc.getText())
@@ -464,38 +536,43 @@ export class DocumentProcess {
 
 	dispose() {
 		this.fstar.close();
-		clearTimeout(this.changeDispatcher);
+		this.changeDispatcher.cancel();
 	}
 
-	get connection() { return this.server.connection; }
-
+	private changeDispatcher = new Debouncer(200, () => {
+		if (!this.pendingChange) return;
+		this.validateFStarDocument(this.lax ? 'lax' : 'cache');
+	});
 	changeDoc(newDoc: TextDocument) {
-		clearTimeout(this.changeDispatcher);
-		this.lastPendingChange = newDoc;
-		this.changeDispatcher = setTimeout(() => {
-			if (!this.lastPendingChange) return;
-			this.validateFStarDocument(this.lax ? 'lax' : 'cache');
-		}, 200);
+		this.currentDoc = newDoc;
+		this.pendingChange = true;
+		this.changeDispatcher.fire();
+
+		const diffOff = findFirstDiffPos(this.currentDoc.getText(), this.lastDocumentSentToFStar);
+		if (diffOff) {
+			const diffPos = this.currentDoc.positionAt(diffOff);
+			this.fstar.cancelFBQ(posAsFStarPos(diffPos));
+
+			if (this.startedProcessingToPosition && posLe(diffPos, this.startedProcessingToPosition)) {
+				this.startedProcessingToPosition = diffPos;
+			}
+		}
+
+		invalidateResults(this.results, newDoc);
+		if (this.newResults) invalidateResults(this.newResults, newDoc);
+		this.documentState.sendStatus();
 	}
 
 	// Lookup the proof state table for the line at the cursor
 	findIdeProofStateAtLine(position: Position) {
-		const rangeKey = position.line + 1;
-		return this.hover_proofstate_info.get(rangeKey);
-	}
-
-	clearIdeProofProofStateAtRange(range: FStarRange) {
-		const line_ctr = range.beg[0];
-		const end_line_ctr = range.end[0];
-		for (let i = line_ctr; i <= end_line_ctr; i++) {
-			this.hover_proofstate_info.delete(i);
-		}
+		const fstarPos = posAsFStarPos(position);
+		return this.results.proofStates.find((ps) => ps.location.beg[0] === fstarPos[0]);
 	}
 
 	private applyPendingChange() {
-		if (this.lastPendingChange) {
-			this.currentDoc = this.lastPendingChange;
-			this.lastPendingChange = undefined;
+		if (this.pendingChange) {
+			this.pendingChange = false;
+			this.lastDocumentSentToFStar = this.currentDoc.getText();
 		}
 	}
 
@@ -504,41 +581,19 @@ export class DocumentProcess {
 		// Clear pending change events, since we're checking it now
 		this.applyPendingChange();
 
-		this.connection.sendClearDiagnostics({ uri: this.uri });
-
-		if (!this.lax) {
-			// If this is non-lax requests, send a status clear messages to VSCode
-			// to clear the gutter icons and error squiggles
-			// They will be reported again if the document is not verified
-			this.prefix_stale = false;
-			this.connection.sendStatusClear({ uri: this.uri });
-			const ranges = [Range.create(mkPosition([0, 0]), mkPosition([this.currentDoc.lineCount, 0]))];
-			if (kind == "full") { this.connection.sendStatusStarted({ uri: this.uri, ranges: ranges }); }
-		}
-
 		this.fstar.fullBufferRequest(this.currentDoc.getText(), kind, false);
 	}
 
-	validateFStarDocumentToPosition(kind: 'verify-to-position' | 'lax-to-position', position: { line: number, column: number }) {
+	validateFStarDocumentToPosition(kind: 'verify-to-position' | 'lax-to-position', position: Position) {
 		// Clear pending change events, since we're checking it now
 		this.applyPendingChange();
 
-		// console.log("ValidateFStarDocumentToPosition( " + textDocument.uri + ", " + kind);
-		this.connection.sendClearDiagnostics({ uri: this.uri });
-		// If this is non-lax requests, send a status clear messages to VSCode
-		// to clear the gutter icons and error squiggles
-		// They will be reported again if the document is not verified
-		this.prefix_stale = false;
-		this.connection.sendStatusClear({ uri: this.uri });
-		const ranges = [Range.create(mkPosition([0, 0]), mkPosition([position.line, 0]))];
-		this.connection.sendStatusStarted({ uri: this.uri, ranges: ranges });
-
-		this.fstar.partialBufferRequest(this.currentDoc.getText(), kind, position);
+		this.fstar.partialBufferRequest(this.currentDoc.getText(), kind, posAsFStarPos(position));
 	}
 
-	private handleSingleFullBufferResponse(response: FullBufferQueryResponse) {
+	private handleSingleFullBufferResponse(response: FullBufferQueryResponse, query: FullBufferQuery) {
 		if (response.kind === 'message' && response.level === 'progress') {
-			this.handleIdeProgress(response.contents as IdeProgress);
+			this.handleIdeProgress(response.contents as IdeProgress, query);
 		} else if (response.kind === 'message' && response.level === 'info') {
 			console.info("Info: " + response.contents);
 		} else if (response.kind === 'message' && response.level === 'error') {
@@ -550,13 +605,13 @@ export class DocumentProcess {
 			// that show the lines that caused F* to emit a warning.
 			console.warn("Warning: " + response.contents);
 		} else if (response.kind === 'message' && response.level === 'proof-state') {
-			this.handleIdeProofState(response.contents as IdeProofState);
+			this.handleIdeProofState(response.contents);
 		} else if (response.kind === 'response') {
 			// TODO(klinvill): if a full-buffer query is interrupted, a null response seems to be sent along with a status. Is this always the behavior that occurs?
 			if (!response.response) {
 				console.info("Query cancelled");
 			} else if (Array.isArray(response.response)) {
-				this.handleIdeDiagnostics(response.response as IdeDiagnostic[]);
+				this.handleIdeDiagnostics(response.response);
 			} else {
 				// ignore
 			}
@@ -581,99 +636,112 @@ export class DocumentProcess {
 		return textdocUri;
 	}
 
-	// If we get a proof state dump message, we store it in the proof state map
 	private handleIdeProofState(response: IdeProofState) {
-		// console.log("Got ide proof state " + JSON.stringify(response));
-		const range_key = response.location.beg[0];
-		const hoverProofStateMap = this.hover_proofstate_info;
-		if (hoverProofStateMap) {
-			// console.log("Setting proof state hover info at line: " +range_key);
-			hoverProofStateMap.set(range_key, response);
+		if (this.newResults) {
+			console.error('received proof state before full-buffer-fragmented-started');
 		}
+		this.results.proofStates.push(response);
 	}
 
-	// If a declaration in a full-buffer is verified, fstar_ide sends
-	// us first a  full-buffer-fragment-started message
-	// We send a status-ok to the client which will
-	// and show an hourglass icon in the gutter for those locations
-	//
-	// Then we may get a full-buffer-fragment-ok message.
-	//
-	// We use that to send a status-ok which will clear the hourglass icon
-	// and show a checkmark in the gutter for the locations we send
-	private handleIdeProgress(contents: IdeProgress) {
-		if (contents.stage == "full-buffer-started") {
-			this.fstar_diagnostics = [];
+	private handleIdeProgress(contents: IdeProgress, query: FullBufferQuery) {
+		if (contents.stage === 'full-buffer-started') {
+			if (query.args['to-position']) {
+				const {line, column} = query.args['to-position'];
+				this.startedProcessingToPosition = mkPosition([line, column]);
+			} else {
+				// FIXME: this can be out of date
+				this.startedProcessingToPosition = this.currentDoc.positionAt(this.currentDoc.getText().length);
+			}
+
+			this.newResults = emptyResults(query.args.code);
 			return;
 		}
-		if (contents.stage == "full-buffer-finished") {
-			this.connection.sendDiagnostics({
-				uri: this.uri,
-				lax: this.lax,
-				diagnostics: this.fstar_diagnostics
-			});
-			return;
-		}
-		if (this.lax) { return; }
-		// We don't send intermediate diagnostics and gutter icons for flycheck progress
-		if (contents.stage == "full-buffer-fragment-ok" ||
-			contents.stage == "full-buffer-fragment-lax-ok") {
-			if (this.prefix_stale) { return; }
-			const rng = contents.ranges;
-			if (!contents["code-fragment"]) { return; }
-			const code_fragment = contents["code-fragment"];
-			const currentText = this.currentDoc.getText(fstarRangeAsRange(code_fragment.range));
-			// compute an MD5 digest of currentText.trim
-			const md5 = crypto.createHash('md5');
-			md5.update(currentText.trim());
-			const digest = md5.digest('hex');
-			if (digest != code_fragment['code-digest']) {
-				if (this.server.configurationSettings.debug) {
-					console.log("Not setting gutter ok icon: Digest mismatch at range " + JSON.stringify(rng));
+
+		if (contents.stage === 'full-buffer-finished') {
+			if (this.newResults) {
+				// No fragments were processed.
+				this.newResults.outOfBandErrors = this.results.outOfBandErrors;
+				this.newResults.proofStates = this.results.proofStates;
+				this.results = this.newResults;
+				this.newResults = undefined;
+			} else {
+				// When cancelling an FBQ, F* sends a full-buffer-fragment-started for the last fragment but no full-buffer-fragment-ok
+				const lastFrag = this.results.fragments.at(-1);
+				if (lastFrag && lastFrag.ok === undefined) {
+					this.results.fragments.pop();
 				}
-				this.prefix_stale = true;
+			}
+			this.startedProcessingToPosition = undefined;
+
+			this.documentState.sendStatus();
+			this.documentState.sendDiags();
+			return;
+		}
+
+		if (contents.stage === 'full-buffer-fragment-started') {
+			if (this.newResults) {
+				// This is the first fragment the server actually processes,
+				// the previous ones were cached and did not generate proof state infos.
+
+				// So let's preserve those infos from previously.
+				const rng = fstarRangeAsRange(contents.ranges);
+				this.newResults.outOfBandErrors.push(...this.results.outOfBandErrors.filter(d => posLe(d.range.end, rng.start)));
+				this.newResults.proofStates.push(...this.results.proofStates.filter(s => fstarPosLe(s.location.end, contents.ranges.beg)));
+
+				this.results = this.newResults;
+				this.newResults = undefined;
+			}
+
+			const invalidatedThroughEdits = !!this.results.invalidAfter
+				&& !posLe(mkPosition(contents.ranges.end), this.results.invalidAfter);
+
+			this.results.fragments.push({
+				range: contents.ranges,
+				invalidatedThroughEdits,
+			});
+
+			this.documentState.sendStatus();
+
+			return;
+		}
+		if (contents.stage === 'full-buffer-fragment-ok' || contents.stage === 'full-buffer-fragment-lax-ok') {
+			const ok = true;
+			const lax = contents.stage !== 'full-buffer-fragment-ok';
+
+			if (this.newResults) {
+				// This is a cached result.
+				const invalidatedThroughEdits = !!this.newResults.invalidAfter
+					&& !posLe(mkPosition(contents.ranges.end), this.newResults.invalidAfter);
+				this.newResults.fragments.push({ ok, lax, range: contents.ranges, invalidatedThroughEdits });
 				return;
 			}
-			const ok_range = Range.create(mkPosition(rng.beg), mkPosition(rng.end));
-			let ok_kind: ok_kind;
-			if (contents.stage == "full-buffer-fragment-lax-ok") { ok_kind = "light-checked"; }
-			else { ok_kind = "checked"; }
-			const msg: StatusOkMessage = {
-				uri: this.uri,
-				ok_kind: ok_kind,
-				ranges: [ok_range]
-			};
-			this.connection.sendStatusOk(msg);
+
+			const frag = this.results.fragments.at(-1)!;
+			frag.ok = ok;
+			frag.lax = lax;
+			frag.invalidatedThroughEdits = !!this.results.invalidAfter
+				&& !posLe(mkPosition(contents.ranges.end), this.results.invalidAfter);
+
+			this.documentState.sendStatus();
+
 			return;
 		}
-		if (contents.stage == "full-buffer-fragment-started") {
-			const rng = contents.ranges;
-			const ok_range = Range.create(mkPosition(rng.beg), mkPosition(rng.end));
-			const msg = {
-				uri: this.uri,
-				ranges: [ok_range]
-			};
-			this.connection.sendStatusInProgress(msg);
-			//If there's any proof state for the range that's starting
-			//clear it, because we'll get updates from fstar_ide
-			this.clearIdeProofProofStateAtRange(rng);
-			return;
-		}
-		if (contents.stage == "full-buffer-fragment-failed") {
-			const rng = contents.ranges;
-			const ok_range = Range.create(mkPosition(rng.beg), mkPosition(rng.end));
-			const msg = {
-				uri: this.uri,
-				ranges: [ok_range]
-			};
-			this.connection.sendStatusFailed(msg);
+		if (contents.stage === 'full-buffer-fragment-failed') {
+			if (this.newResults) {
+				console.error('full-buffer-fragment-failed without fill-buffer-fragment-started');
+				return;
+			}
+
+			const frag = this.results.fragments.at(-1)!;
+			frag.ok = false;
+
+			this.documentState.sendStatus();
+
 			return;
 		}
 	}
 
-	// If we get errors and warnings from F*, we send them to VSCode as diagnostics,
-	// which will show them as squiggles in the editor.
-	private handleIdeDiagnostics(response: IdeDiagnostic[]) {
+	ideDiagAsDiag(diag: IdeDiagnostic): Diagnostic {
 		function ideErrorLevelAsDiagnosticSeverity(level: string): DiagnosticSeverity {
 			switch (level) {
 				case "warning": return DiagnosticSeverity.Warning;
@@ -682,74 +750,41 @@ export class DocumentProcess {
 				default: return DiagnosticSeverity.Error;
 			}
 		}
-		if (!response || !(Array.isArray(response))) {
-			this.connection.sendAlert({ message: "Got invalid response to ide diagnostics request: " + JSON.stringify(response), uri: this.uri });
-			return;
+
+		const defPos: Position = {line: 0, character: 0};
+		const defRange: Range = {start: defPos, end: defPos};
+
+		const ranges = [...diag.ranges];
+		let mainRange = defRange;
+
+		// Use the first range as the range of the diagnostic if it is in the current file,
+		// provide the rest as related info.
+		// Note: this seems to be wrong for pulse. https://github.com/FStarLang/pulse/issues/36
+		if (ranges.length > 0 && ranges[0].fname === '<input>') {
+			mainRange = fstarRangeAsRange(ranges.shift()!);
 		}
-		const diagnostics: Diagnostic[] = [];
-		response.forEach((err) => {
-			let diag: Diagnostic | undefined = undefined;
-			let shouldAlertErrorInDifferentFile = false;
-			err.ranges.forEach((rng) => {
-				if (!diag) {
-					// First range for this error, construct the diagnostic message.
-					let mainRange;
-					const relatedInfo = [];
-					if (rng.fname != "<input>") {
-						// This is a diagnostic raised on another file
-						shouldAlertErrorInDifferentFile = err.level == "error";
-						const defaultRange: FStarRange = {
-							fname: "<input>",
-							beg: [1, 0],
-							end: [1, 0]
-						};
-						mainRange = defaultRange;
-						const relationLocation = {
-							uri: this.qualifyFilename(rng.fname, this.uri),
-							range: fstarRangeAsRange(rng)
-						};
-						const ri: DiagnosticRelatedInformation = {
-							location: relationLocation,
-							message: "related location"
-						};
-						relatedInfo.push(ri);
-					}
-					else {
-						mainRange = rng;
-					}
-					diag = {
-						severity: ideErrorLevelAsDiagnosticSeverity(err.level),
-						range: fstarRangeAsRange(mainRange),
-						message: err.message,
-						relatedInformation: relatedInfo
-					};
-				} else if (diag) {
-					const relatedLocation = {
-						uri: this.qualifyFilename(rng.fname, this.uri),
-						range: fstarRangeAsRange(rng)
-					};
-					const relatedInfo: DiagnosticRelatedInformation = {
-						location: relatedLocation,
-						message: "related location"
-					};
-					if (diag.relatedInformation) {
-						diag.relatedInformation.push(relatedInfo);
-					}
-				}
-			});
-			if (shouldAlertErrorInDifferentFile) {
-				this.connection.sendAlert({ message: err.message, uri: this.uri });
-			}
-			if (diag) {
-				diagnostics.push(diag);
-			}
-		});
-		this.fstar_diagnostics = this.fstar_diagnostics.concat(diagnostics);
+
+		return {
+			message: diag.message,
+			severity: ideErrorLevelAsDiagnosticSeverity(diag.level),
+			range: mainRange,
+			relatedInformation: ranges.map(rng => ({
+				location: {
+					uri: this.qualifyFilename(rng.fname, this.uri),
+					range: fstarRangeAsRange(rng),
+				},
+				message: 'related location',
+			})),
+		};
+	}
+
+	private handleIdeDiagnostics(response: IdeDiagnostic[]) {
+		(this.newResults ?? this.results).diagnostics.push(...response.map(diag => this.ideDiagAsDiag(diag)));
+		this.documentState.sendDiags();
 	}
 
 	async onCompletion(textDocumentPosition: TextDocumentPositionParams): Promise<CompletionItem[] | undefined> {
-		const doc = this.lastPendingChange ?? this.currentDoc;
-		const word = findWordAtPosition(doc, textDocumentPosition.position);
+		const word = findWordAtPosition(this.currentDoc, textDocumentPosition.position);
 		if (word.word.length < 2) return;
 		const response = await this.fstar.autocompleteRequest(word.word);
 		if (response.status !== 'success') return;
@@ -769,7 +804,6 @@ export class DocumentProcess {
 	}
 
 	async onHover(textDocumentPosition: TextDocumentPositionParams): Promise<Hover | undefined> {
-		const textDoc = this.lastPendingChange ?? this.currentDoc;
 		// First, check if we have proof state information for this line
 		const proofState = this.findIdeProofStateAtLine(textDocumentPosition.position);
 		if (proofState) {
@@ -781,7 +815,7 @@ export class DocumentProcess {
 			};
 		}
 		// Otherwise, check the symbol information for this symbol
-		const word = findWordAtPosition(textDoc, textDocumentPosition.position);
+		const word = findWordAtPosition(this.currentDoc, textDocumentPosition.position);
 		// The filename '<input>' here must be exactly the same the we used in the full buffer request.
 		const result = await this.fstar.lookupQuery('<input>', textDocumentPosition.position, word.word);
 		if (result.status !== 'success') return;
@@ -809,8 +843,7 @@ export class DocumentProcess {
 	// It's very similar to the onHover handler, except that it returns a
 	// LocationLink object instead of a Hover object
 	async onDefinition(defParams: DefinitionParams): Promise<LocationLink[] | undefined> {
-		const textDoc = this.lastPendingChange ?? this.currentDoc;
-		const word = findWordAtPosition(textDoc, defParams.position);
+		const word = findWordAtPosition(this.currentDoc, defParams.position);
 		// The filename '<input>' here must be exactly the same the we used in the full buffer request.
 		const result = await this.fstar.lookupQuery('<input>', defParams.position, word.word);
 		if (result.status !== 'success') return [];
@@ -823,14 +856,14 @@ export class DocumentProcess {
 			}
 			const range = fstarRangeAsRange(defined_at);
 			return [{
-				targetUri: this.qualifyFilename(defined_at.fname, textDoc.uri),
+				targetUri: this.qualifyFilename(defined_at.fname, this.currentDoc.uri),
 				targetRange: range,
 				targetSelectionRange: range,
 			}];
 		} else if (result.response.kind === 'module') {
 			const range: Range = {start: {line: 0, character: 0}, end: {line: 0, character: 0}};
 			return [{
-				targetUri: this.qualifyFilename(result.response.path, textDoc.uri),
+				targetUri: this.qualifyFilename(result.response.path, this.currentDoc.uri),
 				targetRange: range,
 				targetSelectionRange: range,
 			}];
@@ -838,8 +871,7 @@ export class DocumentProcess {
 	}
 
 	async onDocumentRangeFormatting(formatParams: DocumentRangeFormattingParams) {
-		const textDoc = this.lastPendingChange ?? this.currentDoc;
-		const text = textDoc.getText(formatParams.range);
+		const text = this.currentDoc.getText(formatParams.range);
 		// call fstar.exe synchronously to format the text
 		const format_query = {
 			"query-id": "1",
