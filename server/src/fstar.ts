@@ -67,15 +67,23 @@ export class FStar {
 
 		// check if fstar_exe can be found in the current path
 		// using which
+		let fstar_exe_resolved: string = config.fstar_exe;
 		try {
-			which.sync(config.fstar_exe);
+			// If there are any slashes in the fstar.exe, turn it into an absolute
+			// path relative to the config's working directory. If it is already
+			// absolute, the working directory will be ignored.
+			if (fstar_exe_resolved.indexOf(path.sep) >= 0) {
+				fstar_exe_resolved = path.resolve(config.cwd, fstar_exe_resolved);
+			}
+			// Search in $PATH
+			fstar_exe_resolved = which.sync(fstar_exe_resolved);
 		}
 		catch (err) {
 			throw new Error("Failed to find fstar.exe in path: " + err);
 		}
 
 		const proc = cp.spawn(
-			config.fstar_exe,
+			fstar_exe_resolved,
 			options,
 			{ cwd: config.cwd }
 		);
