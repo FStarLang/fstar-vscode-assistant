@@ -7,7 +7,7 @@ import {
 } from 'vscode-uri';
 
 import * as cp from 'child_process';
-import * as pstree from 'ps-tree';
+import pstree from 'ps-tree';
 import * as which from 'which';
 import * as fs from 'fs';
 import * as path from 'path';
