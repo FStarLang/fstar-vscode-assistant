@@ -136,18 +136,19 @@
 	},
 	"scripts": {
 		"vscode:prepublish": "npm run compile",
-		"compile": "tsc -b",
-		"watch": "tsc -b -w",
-		"lint": "eslint ./client/src ./server/src --ext .ts,.tsx",
+		"compile": "(cd client && npm run compile) && (cd server && npm run compile)",
+		"watch": "npm run compile",
+		"lint": "tsc --noEmit -p server/tsconfig.json && tsc --noEmit -p client/tsconfig.json && eslint ./client/src ./server/src --ext .ts,.tsx",
 		"postinstall": "cd client && npm install && cd ../server && npm install && cd ..",
 		"test": "cd server && npm test"
 	},
 	"devDependencies": {
-		"@vscode/vsce": "^2.26.0",
 		"@types/node": "^16.11.7",
 		"@types/which": "^3.0.3",
 		"@typescript-eslint/eslint-plugin": "^7.7.1",
 		"@typescript-eslint/parser": "^7.7.1",
+		"@vscode/vsce": "^2.26.0",
+		"esbuild": "^0.21.1",
 		"eslint": "^8.56.0",
 		"typescript": "^5.4.5"
 	}

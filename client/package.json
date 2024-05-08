@@ -12,6 +12,9 @@
 	"engines": {
 		"vscode": "^1.86.0"
 	},
+	"scripts": {
+		"compile": "esbuild --bundle src/extension.ts --outfile=out/extension.js --tsconfig=tsconfig.json --platform=node --external:vscode --sourcemap"
+	},
 	"dependencies": {
 		"vscode-languageclient": "^9.0.1"
 	},
