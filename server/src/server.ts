@@ -403,9 +403,17 @@ export class DocumentState {
 			[...this.fstar.results.diagnostics, ...this.fstar.results.outOfBandErrors];
 
 		if (this.fstar_lax) {
-			// Add diagnostics from the lax position that are after the part processed by the full process.
-			const lastPos = mkPosition(this.fstar.results.fragments.findLast(f => !f.invalidatedThroughEdits && f.ok !== undefined)?.range?.end || [1, 1]);
-			diags.push(...this.fstar_lax.results.diagnostics.filter(d => posLe(lastPos, d.range.start)));
+			// Merge diagnostics from the lax process.
+			// Note: pulse produces *different* diagnostics in the lax process,
+			// in particular `show_proof_state` might only be available there and not in the full process.
+			// Therefore we need to merge diagnostics even for fragments
+			// which have been processed by both the lax and full processes.
+			function rangeStr(r: Range): string { return `${r.start.line}:${r.start.character}-${r.end.line}:${r.end.character}`; }
+			const existingRanges = new Set<string>();
+			for (const diag of this.fstar.results.diagnostics) {
+				existingRanges.add(rangeStr(diag.range));
+			}
+			diags.push(...this.fstar_lax.results.diagnostics.filter(d => !existingRanges.has(rangeStr(d.range))));
 		}
 
 		void this.server.connection.sendDiagnostics({
