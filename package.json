@@ -136,19 +136,24 @@
 	},
 	"scripts": {
 		"vscode:prepublish": "npm run compile",
-		"compile": "tsc -b",
-		"watch": "tsc -b -w",
+		"compile": "rollup -c",
+		"watch": "rollup -c -w",
 		"lint": "eslint ./client/src ./server/src --ext .ts,.tsx",
 		"postinstall": "cd client && npm install && cd ../server && npm install && cd ..",
 		"test": "cd server && npm test"
 	},
 	"devDependencies": {
-		"@vscode/vsce": "^2.26.0",
+		"@rollup/plugin-commonjs": "^25.0.7",
+		"@rollup/plugin-node-resolve": "^15.2.3",
+		"@rollup/plugin-terser": "^0.4.4",
+		"@rollup/plugin-typescript": "^11.1.6",
 		"@types/node": "^16.11.7",
 		"@types/which": "^3.0.3",
 		"@typescript-eslint/eslint-plugin": "^7.7.1",
 		"@typescript-eslint/parser": "^7.7.1",
+		"@vscode/vsce": "^2.26.0",
 		"eslint": "^8.56.0",
+		"rollup": "^4.17.2",
 		"typescript": "^5.4.5"
 	}
 }

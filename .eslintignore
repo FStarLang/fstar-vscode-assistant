@@ -5,3 +5,4 @@ server/node_modules/**
 server/out/**
 /server/tests/**
 /.eslintrc.js
+/rollup.config.mjs
