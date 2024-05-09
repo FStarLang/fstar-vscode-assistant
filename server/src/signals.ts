@@ -63,15 +63,20 @@ export class RateLimiter implements SignalProc {
 		if (this.timeout) {
 			this.missedFire = true;
 		} else {
-			this.timeout = setTimeout(() => {
-				this.timeout = undefined;
-				if (this.missedFire) {
-					this.missedFire = false;
-					this.handler();
-				}
-			}, this.millis);
+			this.setTimeout();
 			// Run async
 			setTimeout(() => this.handler());
 		}
+	}
+
+	private setTimeout() {
+		this.timeout = setTimeout(() => {
+			this.timeout = undefined;
+			if (this.missedFire) {
+				this.missedFire = false;
+				this.setTimeout();
+				this.handler();
+			}
+		}, this.millis);
 	}
 }
