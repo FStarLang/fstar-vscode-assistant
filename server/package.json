@@ -18,7 +18,7 @@
 		"vscode-uri": "^3.0.8"
 	},
 	"scripts": {
-		"compile": "esbuild --bundle src/main.ts --outfile=out/main.js --tsconfig=tsconfig.json --platform=node --sourcemap",
+		"compile": "esbuild --bundle src/main.ts --outfile=out/main.js --tsconfig=tsconfig.json --platform=node --sourcemap --sources-content=false",
 		"test": "jest"
 	},
 	"devDependencies": {
