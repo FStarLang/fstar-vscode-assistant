@@ -37,7 +37,7 @@ export class FStarConnection {
 		bufferedFBR?: FullBufferQuery;
 	};
 
-	onFullBufferResponse: (msg: any) => void = _ => {};
+	onFullBufferResponse: (msg: any, query: FullBufferQuery) => void = _ => {};
 
 	constructor(private fstar: FStar, public debug: boolean) {
 		// TODO(klinvill): Should try to spawn F* from within this constructor
@@ -198,7 +198,7 @@ export class FStarConnection {
 	}
 
 	// Send a request to F* to check the given code up through a position.
-	partialBufferRequest(code: string, kind: 'verify-to-position' | 'lax-to-position', position: { line: number, column: number }) {
+	partialBufferRequest(code: string, kind: 'verify-to-position' | 'lax-to-position', position: FStarPosition) {
 		this.fullBufferQuery({
 			query: "full-buffer",
 			args: {
@@ -207,7 +207,10 @@ export class FStarConnection {
 				code: code,
 				line: 0,
 				column: 0,
-				"to-position": position
+				"to-position": {
+					line: position[0],
+					column: position[1],
+				},
 			}
 		});
 	}
@@ -306,7 +309,7 @@ export class FStarConnection {
 
 	private handleFBQResponse(msg: any) {
 		const done = msg?.kind === 'message' && msg?.level === 'progress' && msg?.contents?.stage === 'full-buffer-finished';
-		this.onFullBufferResponse(msg);
+		this.onFullBufferResponse(msg, this.fullBufferInProgress!.currentReq);
 		if (done) {
 			const old = this.fullBufferInProgress!;
 			this.fullBufferInProgress = undefined;

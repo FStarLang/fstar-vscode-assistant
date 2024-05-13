@@ -21,5 +21,6 @@ module.exports = {
 		'@typescript-eslint/explicit-module-boundary-types': 0,
 		'@typescript-eslint/no-non-null-assertion': 0,
 		'@typescript-eslint/no-floating-promises': 1,
+		'no-inner-declarations': 0,
 	}
 };

@@ -1,5 +1,6 @@
 import {
 	WorkspaceFolder,
+	Connection,
 } from 'vscode-languageserver/node';
 
 import {
@@ -14,7 +15,6 @@ import * as path from 'path';
 import * as util from 'util';
 
 import { fstarVSCodeAssistantSettings } from './settings';
-import { ClientConnection } from './client_connection';
 import { checkFileInDirectory, findFilesByExtension, getEnclosingDirectories } from './utils';
 
 // FStar executable
@@ -93,7 +93,7 @@ export class FStar {
 
 	// Dynamically loads the FStarConfiguration for a given file `textDocument`
 	// before attempting to launch an instance of F*.
-	static async fromInferredConfig(filePath: string, workspaceFolders: WorkspaceFolder[], connection: ClientConnection,
+	static async fromInferredConfig(filePath: string, workspaceFolders: WorkspaceFolder[], connection: Connection,
 			configurationSettings: fstarVSCodeAssistantSettings, lax?: 'lax'): Promise<FStar | undefined> {
 		const config = await this.getFStarConfig(filePath, workspaceFolders, connection, configurationSettings);
 		return this.trySpawnFstar(config, filePath, configurationSettings.debug, lax);
@@ -113,7 +113,7 @@ export class FStar {
 		});
 	}
 
-	static async parseConfigFile(filePath: string, configFile: string, connection: ClientConnection, configurationSettings: fstarVSCodeAssistantSettings): Promise<FStarConfig> {
+	static async parseConfigFile(filePath: string, configFile: string, connection: Connection, configurationSettings: fstarVSCodeAssistantSettings): Promise<FStarConfig> {
 		const contents = await util.promisify(fs.readFile)(configFile, 'utf8');
 		function substituteEnvVars(value: string) {
 			return value.replace(/\$([A-Z_]+[A-Z0-9_]*)|\${([A-Z0-9_]*)}/ig,
@@ -123,7 +123,8 @@ export class FStar {
 						return resolved_env_var;
 					}
 					else {
-						connection.sendAlert({ message: "Failed to resolve environment variable " + (a || b), uri: URI.file(filePath).toString() });
+						connection.window.showErrorMessage(
+							`Failed to resolve environment variable ${a || b} for file ${filePath}`);
 						return "";
 					}
 				});
@@ -214,7 +215,7 @@ export class FStar {
 	// 1. An *.fst.config.json file in a parent directory inside the current workspace
 	// 2. The output printed by `make My.File.fst-in`
 	// 3. A default configuration
-	static async getFStarConfig(filePath: string, workspaceFolders: WorkspaceFolder[], connection: ClientConnection, configurationSettings: fstarVSCodeAssistantSettings): Promise<FStarConfig> {
+	static async getFStarConfig(filePath: string, workspaceFolders: WorkspaceFolder[], connection: Connection, configurationSettings: fstarVSCodeAssistantSettings): Promise<FStarConfig> {
 		// 1. Config file
 		const configFilepath = await this.findConfigFile(filePath, workspaceFolders, configurationSettings);
 		if (configFilepath) {

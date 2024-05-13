@@ -34,6 +34,14 @@ export function rangeAsFStarRange(rng: Range): FStarRange {
 	};
 }
 
+export function fstarPosLe(a: FStarPosition, b: FStarPosition) {
+	return a[0] < b[0] || (a[0] === b[0] && a[1] <= b[1]);
+}
+
+export function posLe(a: Position, b: Position) {
+	return a.line < b.line || (a.line === b.line && a.character <= b.character);
+}
+
 
 ////////////////////////////////////////////////////////////////////////////////////
 // PATH and URI Utilities

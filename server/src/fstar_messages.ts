@@ -93,16 +93,19 @@ export interface IdeCodeFragment {
 	range: FStarRange;
 }
 
-export interface IdeProgress {
-	stage: 'full-buffer-started'
-	| 'full-buffer-fragment-started'
-	| 'full-buffer-fragment-ok'
-	| 'full-buffer-fragment-lax-ok'
-	| 'full-buffer-fragment-failed'
-	| 'full-buffer-finished';
-	ranges: FStarRange;
-	"code-fragment"?: IdeCodeFragment
+export interface IdeProgressStartEnd {
+	stage: 'full-buffer-started' | 'full-buffer-finished';
 }
+export interface IdeProgressFragment {
+	stage: 'full-buffer-fragment-started' | 'full-buffer-fragment-failed';
+	ranges: FStarRange;
+}
+export interface IdeProgressFragmentCheck {
+	stage: 'full-buffer-fragment-ok' | 'full-buffer-fragment-lax-ok';
+	ranges: FStarRange;
+	"code-fragment": IdeCodeFragment
+}
+export type IdeProgress = IdeProgressStartEnd | IdeProgressFragment | IdeProgressFragmentCheck;
 
 
 // An auto-complete response

@@ -7,12 +7,14 @@ import * as path from 'path';
 import { workspace, ExtensionContext, Command } from 'vscode';
 import * as vscode from 'vscode';
 import {
-	DiagnosticRelatedInformation,
 	LanguageClient,
 	LanguageClientOptions,
 	ServerOptions,
-	TransportKind
+	TransportKind,
+	Range,
+	Position
 } from 'vscode-languageclient/node';
+import { StatusNotificationParams, killAllNotification, killAndRestartSolverNotification, restartNotification, statusNotification, verifyToPositionNotification } from './fstarLspExtensions';
 
 let client: LanguageClient;
 
@@ -69,226 +71,64 @@ const proofInProgressDecorationMap : Map<string, vscode.Range[]> = new Map<strin
 // A map from file URI to the started gutter decoration positions for it
 const proofStartedDecorationMap : Map<string, vscode.Range[]> = new Map<string, vscode.Range[]>();
 
-// Diagnostics raised by the server for each document
-interface DocDiagnostics {
-	lax_diagnostics: vscode.Diagnostic [];
-	full_diagnostics: vscode.Diagnostic [];
-}
-const diagnosticsMap : Map<string, DocDiagnostics> = new Map<string, DocDiagnostics>();
-const diagnosticCollection = vscode.languages.createDiagnosticCollection('fstar-vscode-assistant');
-
 // A background color for text being verified: Not currently used
 const inProgressBackground = vscode.window.createTextEditorDecorationType({
 		backgroundColor: 'rgba(100, 0, 255, 0.5)'
 });
 
-
-// Messags in the small protocol running on top of LSP between the server and client
-type ok_kind = 'checked' | 'light-checked';
-interface StatusOkMessage {
-	uri: string;
-	ok_kind: ok_kind;
-	ranges: vscode.Range [];
+function posToCode(range: Position): vscode.Position {
+	return new vscode.Position(range.line, range.character);
 }
 
-interface StatusFailedMessage {
-	uri: string;
-	ranges: vscode.Range [];
+function rangeToCode(range: Range): vscode.Range {
+	return new vscode.Range(posToCode(range.start), posToCode(range.end));
 }
 
-interface StatusClearMessage {
-	uri: string;
+function handleStatus(params: StatusNotificationParams) {
+	const started: vscode.Range[] = [];
+	const inProgress: vscode.Range[] = [];
+	const ok: vscode.Range[] = [];
+	const lax: vscode.Range[] = [];
+
+	for (const frag of params.fragments) {
+		const r = rangeToCode(frag.range);
+		switch (frag.kind) {
+			case 'ok':
+				ok.push(r); break;
+			case 'failed':
+			case 'light-failed':
+				break;
+			case 'lax-ok':
+			case 'light-ok':
+				lax.push(r); break;
+			case 'in-progress':
+				inProgress.push(r); break;
+			case 'started':
+				started.push(r); break;
+		}
+	}
+
+	const uri = params.uri;
+	proofStartedDecorationMap.set(uri, started);
+	gutterLaxDecorationsMap.set(uri, lax);
+	gutterOkDecorationsMap.set(uri, ok);
+	proofInProgressDecorationMap.set(uri, inProgress);
+
+	if (vscode.window.visibleTextEditors.some(ed => ed.document.uri.toString() === params.uri)) {
+		updateDecorations();
+	}
 }
 
-interface StatusStartedMessage {
-	uri: string;
-	ranges: vscode.Range [];
-}
-
-interface StatusInProgressMessage {
-	uri: string;
-	ranges: vscode.Range [];
-}
-
-interface AlertMessage {
-	uri: string;
-	message: string;
-}
-
-interface DiagnosticsMessage {
-	uri: string;
-	lax: boolean;
-	diagnostics: vscode.Diagnostic [];
-}
-
-interface ClearDiagnosticsMessage {
-	uri: string;
-}
-
-// This function is called when the active editor changes or when a status message is received
-// We set the gutter decorations for the document in the new active editor
-// if the URI matches the URI of the document in the new active editor
-function setActiveEditorDecorationsIfUriMatches(uri: string) {
-	const editor = vscode.window.activeTextEditor;
-	if (!editor) {	return; }
-	if (editor.document.uri.toString() === uri) {
-		//it important to set it in this order since they get overwritten
-		// First, show the started (...) icons for all the lines where the proof has been launched, 
-		// but only on the suffix of the buffer where the proof has not been completed
-		// Then, show  the hourglass icons for all the lines where the proof is currently running progress
-		// Then, show the green line icons for all the lines where the proof has succeeded
-		// Or, show the blue line for all the lines where the proof has lax succeeded
-		const started = proofStartedDecorationMap.get(uri) ?? [];
-		const maxCheckLine = Math.max(...(gutterOkDecorationsMap.get(uri) ?? []).map(range => range.end.line));
-		const maxLightCheckLine = Math.max(...(gutterLaxDecorationsMap.get(uri) ?? []).map(range => range.end.line));
-		const checkLine = Math.max(maxCheckLine, maxLightCheckLine);
-		const startedIcons : vscode.Range[] = [];
-		started.forEach(startedRange => { 
-			if (startedRange.end.line > checkLine) {
-				// find the first line from checkLine + 1 that has some text on it
-				let startedLine = checkLine + 1;
-				while (startedLine < startedRange.end.line) {
-					const lineText = editor.document.lineAt(startedLine).text;
-					if (lineText.trim().length > 0) {
-						break;
-					}
-					startedLine++;
-				}
-				if (startedLine < startedRange.end.line) {
-					startedIcons.push(new vscode.Range(startedLine, 0, startedRange.end.line, 0));
-				}
-			}});
-		editor.setDecorations(gutterIconStarted, startedIcons);
+function updateDecorations() {
+	for (const editor of vscode.window.visibleTextEditors) {
+		const uri = editor.document.uri.toString();
+		editor.setDecorations(gutterIconStarted, proofStartedDecorationMap.get(uri) ?? []);
 		editor.setDecorations(gutterIconHourglass, proofInProgressDecorationMap.get(uri) ?? []);
 		editor.setDecorations(gutterIconOk, gutterOkDecorationsMap.get(uri) ?? []);
-		if (fstarVSCodeAssistantSettings.showLightCheckIcon) {
-			editor.setDecorations(gutterIconLax, gutterLaxDecorationsMap.get(uri) ?? []);
-		}
-		// Here's how you would set a background color for a region of text
-		// editor.setDecorations(inProgressBackground, backgroundColorDecorationMap.get(uri) ?? []);
+		editor.setDecorations(gutterIconLax,
+			fstarVSCodeAssistantSettings.showLightCheckIcon ?
+				gutterLaxDecorationsMap.get(uri) ?? [] : []);
 	}
-}
-
-// This function is called when the server sends a statusOk message
-// We add the ranges to the map of gutter decorations for the file
-// clearing any hourglass decorations
-// and set the decorations for the active editor if the URI matches
-function handleStatusOk (msg : StatusOkMessage)  {
-	if (msg.ok_kind == "light-checked") {
-		const currentDecorations : vscode.Range [] = gutterLaxDecorationsMap.get(msg.uri) ?? [];
-		msg.ranges.forEach (range => {
-			currentDecorations.push(range);
-		});
-		gutterLaxDecorationsMap.set(msg.uri, currentDecorations);	
-	}
-	else {
-		const currentDecorations : vscode.Range [] = gutterOkDecorationsMap.get(msg.uri) ?? [];
-		msg.ranges.forEach (range => {
-			currentDecorations.push(range);
-		});
-		gutterOkDecorationsMap.set(msg.uri, currentDecorations);
-	}
-	// clear hourglasses
-	proofInProgressDecorationMap.set(msg.uri, []);
-	setActiveEditorDecorationsIfUriMatches(msg.uri);
-}
-
-// This function is called when the server decided that a chunk has failed verification
-// Clear any hourglass and started decorations
-function handleStatusFailed (msg : StatusFailedMessage)  {
-	proofInProgressDecorationMap.set(msg.uri, []);
-	proofStartedDecorationMap.set(msg.uri, []);
-	setActiveEditorDecorationsIfUriMatches(msg.uri);
-}
-
-// This function is called when the server sends a statusStarted message
-// We record the ranges in the proofStartedDecorationMap
-// and display the started on those lines
-function handleStatusStarted (msg: StatusStartedMessage): void {
-	// console.log("Received statusClear notification: " +msg);
-	proofStartedDecorationMap.set(msg.uri, msg.ranges);
-	setActiveEditorDecorationsIfUriMatches(msg.uri);
-}
-
-// This function is called when the server sends a statusInProgress message
-// We record the ranges in the proofInProgressDecorationMap
-// and display the hourglass on those lines
-function handleStatusInProgress (msg: StatusInProgressMessage): void {
-	// console.log("Received statusClear notification: " +msg);
-	proofInProgressDecorationMap.set(msg.uri, msg.ranges);
-	setActiveEditorDecorationsIfUriMatches(msg.uri);
-}
-
-// This function is called when the server sends a statusClear message
-// We clear the gutter decorations for the file
-function handleStatusClear (msg: StatusClearMessage): void {
-	// console.log("Received statusClear notification: " +msg);
-	gutterOkDecorationsMap.set(msg.uri, []);
-	gutterLaxDecorationsMap.set(msg.uri, []);
-	proofStartedDecorationMap.set(msg.uri, []);
-	proofInProgressDecorationMap.set(msg.uri, []);
-	diagnosticsMap.set(msg.uri, { lax_diagnostics: [], full_diagnostics: [] });
-	const uri = vscode.Uri.parse(msg.uri);
-	diagnosticCollection.set(uri, []);
-	setActiveEditorDecorationsIfUriMatches(msg.uri);
-}
-
-// This function is called by the server in case F* crashed or was killed
-async function handleAlert(msg: AlertMessage) {
-	await vscode.window.showErrorMessage(msg.message + "\n On document: " + msg.uri);
-}
-
-function handleDiagnostics(msg: DiagnosticsMessage) {
-	const docDiagnostics : DocDiagnostics =
-		diagnosticsMap.get(msg.uri) ?? { lax_diagnostics: [], full_diagnostics: [] };
-	msg.diagnostics.forEach(element => {
-		if (element.relatedInformation) {
-			element.relatedInformation.forEach (ri => {
-				ri.location.uri = vscode.Uri.parse(ri.location.uri.toString());
-			});
-		}
-	});
-	if (msg.lax) {
-		docDiagnostics.lax_diagnostics = msg.diagnostics;
-	}
-	else {
-		docDiagnostics.full_diagnostics = msg.diagnostics;
-	}
-	diagnosticsMap.set(msg.uri, docDiagnostics);
-	const all_diags = docDiagnostics.lax_diagnostics.concat([]);
-	function rangeEquals(r1: vscode.Range, r2: vscode.Range) {
-		return (
-			r1.start.line == r2.start.line &&
-			r1.start.character == r2.start.character &&
-			r1.end.line == r2.end.line && r1.end.character == r2.end.character
-			);
-	}
-	function docContainsDiagnostic(diag: vscode.Diagnostic) {
-		return all_diags.some(d => rangeEquals(d.range, diag.range) && d.message === diag.message);
-	}
-	// De-duplicate diagnostics, because we may get diagnostics from multiple sources
-	// both the fstar_ide and fstar_lax_ide servers may send diagnostics
-	docDiagnostics.full_diagnostics.forEach(diag => {
-		if (!docContainsDiagnostic(diag)) {
-			all_diags.push(diag);
-		}
-	});
-	const uri = vscode.Uri.parse(msg.uri);
-	diagnosticCollection.set(uri, all_diags);
-}
-
-function handleClearDiagnostics(msg : ClearDiagnosticsMessage) {
-	diagnosticsMap.set(msg.uri, { lax_diagnostics: [], full_diagnostics: [] });
-	const uri = vscode.Uri.parse(msg.uri);
-	diagnosticCollection.set(uri, []);
-}
-
-// A client-only handler for a active editor changed raised by the editor
-// We set the gutter decorations for the document in the new active editor
-function handleDidChangeActiveEditor(editor? : vscode.TextEditor) {
-	if (!editor) return;
-	// console.log("Active editor changed to " + editor.document.uri.toString());
-	setActiveEditorDecorationsIfUriMatches(editor.document.uri.toString());
 }
 
 export async function activate(context: ExtensionContext) {
@@ -311,10 +151,7 @@ export async function activate(context: ExtensionContext) {
 	const clientOptions: LanguageClientOptions = {
 		// Register the server for plain text documents
 		documentSelector: [{ scheme: 'file', language: 'fstar'}],
-		synchronize: {
-			// Notify the server about file changes to '.clientrc files contained in the workspace
-			fileEvents: workspace.createFileSystemWatcher('**/.clientrc')
-		}
+		diagnosticCollectionName: 'fstar',
 	};
 
 	// Create the language client and start the client.
@@ -325,73 +162,33 @@ export async function activate(context: ExtensionContext) {
 		clientOptions
 	);
 	
-	client.onNotification('fstar-vscode-assistant/statusOk', handleStatusOk);
-	client.onNotification('fstar-vscode-assistant/statusClear', handleStatusClear);
-	client.onNotification('fstar-vscode-assistant/statusStarted', handleStatusStarted);
-	client.onNotification('fstar-vscode-assistant/statusInProgress', handleStatusInProgress);
-	client.onNotification('fstar-vscode-assistant/statusFailed', handleStatusFailed);
-	client.onNotification('fstar-vscode-assistant/alert', handleAlert);
-	client.onNotification('fstar-vscode-assistant/diagnostics', handleDiagnostics);
-	client.onNotification('fstar-vscode-assistant/clearDiagnostics', handleClearDiagnostics);
-	vscode.window.onDidChangeActiveTextEditor(handleDidChangeActiveEditor);
+	client.onNotification(statusNotification, status => handleStatus(status));
+	vscode.window.onDidChangeVisibleTextEditors(() => updateDecorations());
 
 	// register a command for Ctrl+.
-	const verifyCommand = vscode.commands.registerTextEditorCommand('fstar-vscode-assistant/verify-to-position', async (textEditor, edit) => {
-		// console.log('Client: Command <verify-to-position> executed with uri: ' + textEditor.document.uri + " at positon " + textEditor.selection.active.line + ", " + textEditor.selection.active.character);
-		await client.sendRequest('fstar-vscode-assistant/verify-to-position', [textEditor.document.uri.toString(), textEditor.selection.active]);
-	});
-	context.subscriptions.push(verifyCommand);
+	context.subscriptions.push(vscode.commands.registerTextEditorCommand('fstar-vscode-assistant/verify-to-position', textEditor =>
+		client.sendNotification(verifyToPositionNotification, {
+			uri: textEditor.document.uri.toString(),
+			lax: false,
+			position: textEditor.selection.active,
+		})));
 
-	// register a command for Ctrl+;,Ctrl+.
-	const reloadAndVerifyCommand = vscode.commands.registerTextEditorCommand('fstar-vscode-assistant/restart', async (textEditor, edit) => {
-		// console.log('Client: Command <restart> executed with uri: ' + textEditor.document.uri);
-		await client.sendRequest('fstar-vscode-assistant/restart', textEditor.document.uri.toString());
-	});
-	context.subscriptions.push(reloadAndVerifyCommand);
+	context.subscriptions.push(vscode.commands.registerTextEditorCommand('fstar-vscode-assistant/restart', textEditor =>
+		client.sendNotification(restartNotification, { uri: textEditor.document.uri.toString() })));
 
 	// register a command for Ctrl+Shift+.
-	const laxVerifyCommand = vscode.commands.registerTextEditorCommand('fstar-vscode-assistant/lax-to-position', async (textEditor, edit) => {
-		// console.log('Client: Command <lax-to-position> executed with uri: ' + textEditor.document.uri + " at positon " + textEditor.selection.active.line + ", " + textEditor.selection.active.character);
-		await client.sendRequest('fstar-vscode-assistant/lax-to-position', [textEditor.document.uri.toString(), textEditor.selection.active]);
-	});
-	context.subscriptions.push(laxVerifyCommand);
+	context.subscriptions.push(vscode.commands.registerTextEditorCommand('fstar-vscode-assistant/lax-to-position', textEditor =>
+		client.sendNotification(verifyToPositionNotification, {
+			uri: textEditor.document.uri.toString(),
+			lax: true,
+			position: textEditor.selection.active,
+		})));
 
-	const killAndRestartSolverCommand =
-		vscode.commands.registerTextEditorCommand('fstar-vscode-assistant/kill-and-restart-solver', async (textEditor, edit) => {
-		await client.sendRequest('fstar-vscode-assistant/kill-and-restart-solver', [textEditor.document.uri.toString()]);
-	});
-	context.subscriptions.push(killAndRestartSolverCommand);
+	context.subscriptions.push(vscode.commands.registerTextEditorCommand('fstar-vscode-assistant/kill-and-restart-solver', textEditor =>
+		client.sendNotification(killAndRestartSolverNotification, { uri: textEditor.document.uri.toString() })));
 	
-	const killAllCommand =
-		vscode.commands.registerTextEditorCommand('fstar-vscode-assistant/kill-all', async (textEditor, edit) => {
-		await client.sendRequest('fstar-vscode-assistant/kill-all', []);
-	});
-	context.subscriptions.push(killAllCommand);
-
-	// console.log("Activate called on " + context.asAbsolutePath("/"));
-
-	workspace.onDidChangeTextDocument(async (event) => {
-		// console.log("OnDidChangeTextDocument");
-		const textDoc = event.document;
-		let minRange : vscode.Range | undefined;
-		function compareRange (a? : vscode.Range, b? : vscode.Range) : number {
-			if (!a) { return -1; }
-			if (!b) { return 1; }
-			if (a.start.line < b.start.line) return -1;
-			if (a.start.line > b.start.line) return 1;
-			if (a.start.character < b.start.character) return -1;
-			if (a.start.character > b.start.character) return 1;
-			return 0;
-		}
-		event.contentChanges.forEach((change) => {
-			if (compareRange(minRange, change.range) < 0) {
-				minRange = change.range;
-			}
-		});
-		if (minRange) {
-			await client.sendRequest('fstar-vscode-assistant/text-doc-changed', [textDoc.uri.toString(), minRange]);
-		}
-	});
+	context.subscriptions.push(vscode.commands.registerTextEditorCommand('fstar-vscode-assistant/kill-all', () =>
+		client.sendNotification(killAllNotification, {})));
 
 	workspace.onDidChangeConfiguration((event) => {
 		const cfg = workspace.getConfiguration('fstarVSCodeAssistant');
@@ -407,9 +204,6 @@ export async function activate(context: ExtensionContext) {
 	await client.start();
 }
 
-export function deactivate(): Thenable<void> | undefined {
-	if (!client) {
-		return undefined;
-	}
-	return client.stop();
+export async function deactivate() {
+	await client?.stop();
 }
