@@ -51,8 +51,10 @@ jobs:
     runs-on: ubuntu-latest
     environment: vsm-deploy
 
-    permissions:
-      id-token: write
+    # Github documentation suggests to set `permissions: id-token: write` here,
+    # but that setting surprisingly disables all other permissions as well.
+    # The `write-all` permission enables OIDC tokens *in addition* to the usual permissions.
+    permissions: write-all
 
     steps:
       - name: Checkout
