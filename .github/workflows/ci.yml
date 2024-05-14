@@ -39,10 +39,40 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
+          name: fstar-vscode-assistant
           path: |
             *.vsix
             fstar-language-server-*.js
           if-no-files-found: error
+
+  deploy:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    environment: vsm-deploy
+
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: npm install
+
+      # We could also rebuild here, since esbuild is super fast.
+      - name: Download artifact from build job
+        uses: actions/download-artifact@v4
+        with:
+          name: fstar-vscode-assistant
+
+      - name: Azure workload identity federation login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
 
       - name: Upload extension to github release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -58,6 +88,4 @@ jobs:
       - name: Publish packaged extension
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
-          npx vsce publish -i *.vsix
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+          npx vsce publish --azure-credential -i *.vsix
