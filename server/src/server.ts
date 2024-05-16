@@ -396,7 +396,7 @@ export class DocumentState {
 	}
 
 	sendDiags() { this.diagnosticsRateLimiter.fire(); }
-	diagnosticsRateLimiter = new RateLimiter(100, () => {
+	diagnosticsRateLimiter = new RateLimiter(200, () => {
 		if (this.disposed) return;
 
 		const diags =
@@ -423,7 +423,7 @@ export class DocumentState {
 	});
 
 	sendStatus() { this.statusRateLimiter.fire(); }
-	private statusRateLimiter = new RateLimiter(100, () => {
+	private statusRateLimiter = new RateLimiter(200, () => {
 		if (this.disposed) return;
 
 		const fragments = [...this.fstar.results.fragments];
