@@ -405,7 +405,9 @@ export class DocumentState {
 		if (this.fstar_lax) {
 			// Add diagnostics from the lax position that are after the part processed by the full process.
 			const lastPos = mkPosition(this.fstar.results.fragments.findLast(f => !f.invalidatedThroughEdits && f.ok !== undefined)?.range?.end || [1, 1]);
-			diags.push(...this.fstar_lax.results.diagnostics.filter(d => posLe(lastPos, d.range.start)));
+			diags.push(...this.fstar_lax.results.diagnostics.filter(d => posLe(lastPos, d.range.start))
+				// Downgrade flycheck severity to warning
+				.map(diag => ({...diag, source: 'F* flycheck', ...(diag.severity === DiagnosticSeverity.Error && { severity: DiagnosticSeverity.Warning })})));
 		}
 
 		void this.server.connection.sendDiagnostics({
@@ -767,6 +769,7 @@ export class DocumentProcess {
 		return {
 			message: diag.message,
 			severity: ideErrorLevelAsDiagnosticSeverity(diag.level),
+			source: 'F*',
 			range: mainRange,
 			relatedInformation: ranges.map(rng => ({
 				location: {
