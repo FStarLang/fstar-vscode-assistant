@@ -37,7 +37,7 @@ import { FStar, FStarConfig } from './fstar';
 import { FStarRange, IdeProofState, IdeProgress, IdeDiagnostic, FullBufferQueryResponse, FStarPosition, FullBufferQuery } from './fstar_messages';
 import * as path from 'path';
 import { pathToFileURL } from 'url';
-import { statusNotification, FragmentStatus, killAndRestartSolverNotification, restartNotification, verifyToPositionNotification, killAllNotification, TelemetryEventProperties, TelemetryEventMeasurements } from './fstarLspExtensions';
+import { statusNotification, FragmentStatus, killAndRestartSolverNotification, restartNotification, verifyToPositionNotification, killAllNotification, TelemetryEventProperties, TelemetryEventMeasurements, telemetryNotification } from './fstarLspExtensions';
 import { Debouncer, RateLimiter } from './signals';
 
 // LSP Server
@@ -142,7 +142,7 @@ export class Server {
 	}
 
 	sendTelemetryEvent(eventName: string, properties?: TelemetryEventProperties, measurements?: TelemetryEventMeasurements) {
-
+		void this.connection.sendNotification(telemetryNotification, {eventName, properties, measurements});
 	}
 
 	run() {

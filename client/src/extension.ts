@@ -132,10 +132,11 @@ function updateDecorations() {
 	}
 }
 
+let telemetry: TelemetryReporter;
+
 export async function activate(context: ExtensionContext) {
-	const telemetry = new TelemetryReporter(
-		// '160d3440-45e8-47c1-9cf1-ccd46149ff89'
-		'InstrumentationKey=160d3440-45e8-47c1-9cf1-ccd46149ff89;IngestionEndpoint=https://eastus-8.in.applicationinsights.azure.com/;LiveEndpoint=https://eastus.livediagnostics.monitor.azure.com/;ApplicationId=a4e6ffa7-4f8c-47c3-8d7f-0f4dbcf57019'
+	telemetry = new TelemetryReporter(
+		'160d3440-45e8-47c1-9cf1-ccd46149ff89'
 	);
 	telemetry.sendTelemetryEvent('test', {test:'test'});
 
@@ -216,4 +217,5 @@ export async function activate(context: ExtensionContext) {
 
 export async function deactivate() {
 	await client?.stop();
+	await telemetry?.dispose();
 }
