@@ -37,7 +37,7 @@ import { FStar, FStarConfig } from './fstar';
 import { FStarRange, IdeProofState, IdeProgress, IdeDiagnostic, FullBufferQueryResponse, FStarPosition, FullBufferQuery } from './fstar_messages';
 import * as path from 'path';
 import { pathToFileURL } from 'url';
-import { statusNotification, FragmentStatus, killAndRestartSolverNotification, restartNotification, verifyToPositionNotification, killAllNotification } from './fstarLspExtensions';
+import { statusNotification, FragmentStatus, killAndRestartSolverNotification, restartNotification, verifyToPositionNotification, killAllNotification, TelemetryEventProperties, TelemetryEventMeasurements } from './fstarLspExtensions';
 import { Debouncer, RateLimiter } from './signals';
 
 // LSP Server
@@ -72,14 +72,17 @@ export class Server {
 		//  * spawn 2 fstar processes: one for typechecking, one lax process for fly-checking and symbol lookup
 		//  * set event handlers to read the output of the fstar processes
 		//  * send the current document to both processes to start typechecking
-		this.documents.onDidOpen(ev =>
-			this.onOpenHandler(ev.document)
+		this.documents.onDidOpen(ev => {
+			this.sendTelemetryEvent('fstarOpen', {fileName: ev.document.uri, contents: ev.document.getText()});
+			return this.onOpenHandler(ev.document)
 				.catch(err => this.connection.window.showErrorMessage(
 					`${URI.parse(ev.document.uri).fsPath}: ${err.toString()}`))
-				.catch());
+				.catch();
+		});
 
 		// Only keep settings for open documents
 		this.documents.onDidClose(e => {
+			this.sendTelemetryEvent('fstarClose', {fileName: e.document.uri, contents: e.document.getText()});
 			this.documentStates.get(e.document.uri)?.dispose();
 			this.documentStates.delete(e.document.uri);
 		});
@@ -122,6 +125,7 @@ export class Server {
 
 		// Custom events
 		this.connection.onNotification(verifyToPositionNotification, ({uri, position, lax}) => {
+			this.sendTelemetryEvent('fstarVerifyToPosition', { uri, lax, position });
 			const state = this.getDocumentState(uri);
 			if (lax) {
 				state?.laxToPosition(position);
@@ -135,6 +139,10 @@ export class Server {
 			this.getDocumentState(uri)?.killAndRestartSolver());
 		this.connection.onNotification(killAllNotification, () =>
 			this.onKillAllRequest());
+	}
+
+	sendTelemetryEvent(eventName: string, properties?: TelemetryEventProperties, measurements?: TelemetryEventMeasurements) {
+
 	}
 
 	run() {
@@ -410,6 +418,7 @@ export class DocumentState {
 				.map(diag => ({...diag, source: 'F* flycheck', ...(diag.severity === DiagnosticSeverity.Error && { severity: DiagnosticSeverity.Warning })})));
 		}
 
+		this.server.sendTelemetryEvent('fstarDiagnostics', { uri: this.uri, diagnostics: diags });
 		void this.server.connection.sendDiagnostics({
 			uri: this.uri,
 			diagnostics: diags,
@@ -444,6 +453,7 @@ export class DocumentState {
 			});
 		}
 
+		this.server.sendTelemetryEvent('fstarProgress', { uri: this.uri, fragments: statusFragments });
 		void this.server.connection.sendNotification(statusNotification, {
 			uri: this.uri,
 			fragments: statusFragments,

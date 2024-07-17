@@ -46,3 +46,18 @@ export const verifyToPositionNotification =
 	new ProtocolNotificationType<VerifyToPositionParams, RegistrationParams>('$/fstar/verifyToPosition');
 
 interface RegistrationParams {}
+
+export interface TelemetryEventProperties {
+	readonly [key: string]: string | undefined
+		| any; //apparently we need the safe type here??
+}
+export interface TelemetryEventMeasurements {
+	readonly [key: string]: number | undefined;
+}
+export interface TelemetryNotificationParams {
+	eventName: string;
+	properties?: TelemetryEventProperties;
+	measurements?: TelemetryEventMeasurements;
+}
+export const telemetryNotification =
+	new ProtocolNotificationType<TelemetryNotificationParams, RegistrationParams>('$/fstar/telemetry');

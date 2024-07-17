@@ -14,7 +14,8 @@ import {
 	Range,
 	Position
 } from 'vscode-languageclient/node';
-import { StatusNotificationParams, killAllNotification, killAndRestartSolverNotification, restartNotification, statusNotification, verifyToPositionNotification } from './fstarLspExtensions';
+import { StatusNotificationParams, killAllNotification, killAndRestartSolverNotification, restartNotification, statusNotification, telemetryNotification, verifyToPositionNotification } from './fstarLspExtensions';
+import TelemetryReporter from '@vscode/extension-telemetry';
 
 let client: LanguageClient;
 
@@ -132,6 +133,12 @@ function updateDecorations() {
 }
 
 export async function activate(context: ExtensionContext) {
+	const telemetry = new TelemetryReporter(
+		// '160d3440-45e8-47c1-9cf1-ccd46149ff89'
+		'InstrumentationKey=160d3440-45e8-47c1-9cf1-ccd46149ff89;IngestionEndpoint=https://eastus-8.in.applicationinsights.azure.com/;LiveEndpoint=https://eastus.livediagnostics.monitor.azure.com/;ApplicationId=a4e6ffa7-4f8c-47c3-8d7f-0f4dbcf57019'
+	);
+	telemetry.sendTelemetryEvent('test', {test:'test'});
+
 	// The server is implemented in node
 	const serverModule = context.asAbsolutePath(
 		path.join('server', 'out', 'main.js')
@@ -164,6 +171,9 @@ export async function activate(context: ExtensionContext) {
 	
 	client.onNotification(statusNotification, status => handleStatus(status));
 	vscode.window.onDidChangeVisibleTextEditors(() => updateDecorations());
+
+	client.onNotification(telemetryNotification, params =>
+		telemetry.sendTelemetryEvent(params.eventName, params.properties, params.measurements));
 
 	// register a command for Ctrl+.
 	context.subscriptions.push(vscode.commands.registerTextEditorCommand('fstar-vscode-assistant/verify-to-position', textEditor =>
