@@ -9,6 +9,9 @@
 			"include": "#strings"
 		},
 		{
+			"include": "#characters"
+		},
+		{
 			"include": "#comments"
 		}
 	],
@@ -28,6 +31,12 @@
 					"name": "constant.character.escape.fstar",
 					"match": "\\\\."
 				}
+			]
+		},
+		"characters": {
+			"patterns": [
+				{ "name": "string.quoted.single.fstar", "match": "'[^\\\\']'" },
+				{ "name": "string.quoted.single.fstar", "match": "'\\\\.'" }
 			]
 		},
 		"comments": {
