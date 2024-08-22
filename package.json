@@ -129,7 +129,13 @@
 				"key": "ctrl+; ctrl+shift+c",
 				"when": "editorTextFocus && editorLangId == fstar"
 			}
-		]
+		],
+		"configurationDefaults": {
+			"[fstar]": {
+				"editor.tabSize": 2,
+				"editor.insertSpaces": true
+			}
+		}
 	},
 	"scripts": {
 		"vscode:prepublish": "npm run compile",
