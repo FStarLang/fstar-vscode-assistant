@@ -15,6 +15,7 @@ import {
 	Position
 } from 'vscode-languageclient/node';
 import { StatusNotificationParams, killAllNotification, killAndRestartSolverNotification, restartNotification, statusNotification, verifyToPositionNotification } from './fstarLspExtensions';
+import { CheckedFileEditorProvider, KrmlFileEditorProvider } from './binaryeditors';
 
 let client: LanguageClient;
 
@@ -200,6 +201,9 @@ export async function activate(context: ExtensionContext) {
 			showLightCheckIcon: cfg.get('showLightCheckIcon', fstarVSCodeAssistantSettings.showLightCheckIcon),
 		};
 	});
+
+	context.subscriptions.push(vscode.window.registerCustomEditorProvider('fstar.checked', new CheckedFileEditorProvider()));
+	context.subscriptions.push(vscode.window.registerCustomEditorProvider('fstar.krml', new KrmlFileEditorProvider()));
 
 	await client.start();
 }

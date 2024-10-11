@@ -40,6 +40,29 @@
 				"path": "./syntaxes/fstar.tmLanguage.json"
 			}
 		],
+		"customEditors": [
+			{
+				"viewType": "fstar.checked",
+				"displayName": "F* Checked File",
+				"selector": [
+					{
+						"filenamePattern": "*.fst.checked"
+					},
+					{
+						"filenamePattern": "*.fsti.checked"
+					}
+				]
+			},
+			{
+				"viewType": "fstar.krml",
+				"displayName": "F* Krml File",
+				"selector": [
+					{
+						"filenamePattern": "*.krml"
+					}
+				]
+			}
+		],
 		"configuration": {
 			"type": "object",
 			"title": "F* VSCode Assistant",
