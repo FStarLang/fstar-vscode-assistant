@@ -3,16 +3,7 @@
 	"name": "F*",
 	"patterns": [
 		{
-			"include": "#keywords"
-		},
-		{
-			"include": "#strings"
-		},
-		{
-			"include": "#characters"
-		},
-		{
-			"include": "#comments"
+			"include": "#fstar"
 		}
 	],
 	"repository": {
@@ -73,7 +64,55 @@
 					]
 				}
 			]
-
+		},
+		"dsl": {
+			"patterns": [
+				{
+					"name": "meta.dsl.fstar",
+					"begin": "(#lang-pulse)\\b",
+					"captures": {
+						"1": {"name": "keyword.dsl.fstar"}
+					},
+					"patterns": [
+						{ "name": "keyword.control.fstar.pulse", "match": "\\b(mut|invariant|while|fn|parallel|each|rewrite|fold|atomic|ghost|with_invariants|opens|show_proof_state)\\b" },
+						{ "include": "#fstar" }
+					],
+					"end": "(?=#lang-.*)"
+				},
+				{
+					"name": "meta.dsl.fstar",
+					"begin": "(#lang-fstar)\\b",
+					"captures": { "1": {"name": "keyword.dsl.fstar"} },
+					"patterns": [
+						{ "include": "#fstar" }
+					],
+					"end": "(?=#lang-.*)"
+				},
+				{
+					"name": "meta.dsl.fstar",
+					"match": "(#lang-\\w+)\\b",
+					"captures": { "1": {"name": "keyword.dsl.fstar"} }
+				}
+			]
+		},
+		"fstar": {
+			"patterns": [
+				{
+					"include": "#keywords"
+				},
+				{
+					"include": "#strings"
+				},
+				{
+					"include": "#characters"
+				},
+				{
+					"include": "#dsl"
+				},
+				{
+					"include": "#comments"
+				}
+			]
 		}
 	},
 	"scopeName": "source.fst"
