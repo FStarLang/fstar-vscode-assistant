@@ -49,7 +49,7 @@ import { Debouncer, RateLimiter } from './signals';
 // allows for easier mocking out of these connections which in turn allows for
 // easier testing.
 export class Server {
-	documentStates: Map<string, DocumentState> = new Map();
+	documentStates = new Map<string, DocumentState>();
 	// Text document manager.
 	documents: TextDocuments<TextDocument>;
 	// All the open workspace folders
@@ -105,9 +105,9 @@ export class Server {
 		// for the official documentation on this behavior, and
 		// https://javascript.info/bind for another explanation.
 		this.connection.onInitialize(params => this.onInitialize(params));
-		this.connection.onInitialized(() => this.onInitializedHandler());
+		this.connection.onInitialized(() => void this.onInitializedHandler());
 		// We don't do anything special when the configuration changes
-		this.connection.onDidChangeConfiguration(() => this.updateConfigurationSettings());
+		this.connection.onDidChangeConfiguration(() => void this.updateConfigurationSettings());
 		this.connection.onCompletion(textDocumentPosition =>
 			this.getDocumentState(textDocumentPosition.textDocument.uri)?.onCompletion(textDocumentPosition));
 		// This handler resolves additional information for the item selected in
@@ -130,9 +130,9 @@ export class Server {
 			}
 		});
 		this.connection.onNotification(restartNotification, ({uri}) =>
-			this.onRestartRequest(uri));
+			void this.onRestartRequest(uri));
 		this.connection.onNotification(killAndRestartSolverNotification, ({uri}) =>
-			this.getDocumentState(uri)?.killAndRestartSolver());
+			void this.getDocumentState(uri)?.killAndRestartSolver());
 		this.connection.onNotification(killAllNotification, () =>
 			this.onKillAllRequest());
 	}
@@ -196,17 +196,9 @@ export class Server {
 		// If not, we fall back using global settings.
 		// This is left-over from the lsp-sample
 		// We don't do anything special with configuations yet
-		this.hasConfigurationCapability = !!(
-			capabilities.workspace && !!capabilities.workspace.configuration
-		);
-		this.hasWorkspaceFolderCapability = !!(
-			capabilities.workspace && !!capabilities.workspace.workspaceFolders
-		);
-		this.hasDiagnosticRelatedInformationCapability = !!(
-			capabilities.textDocument &&
-			capabilities.textDocument.publishDiagnostics &&
-			capabilities.textDocument.publishDiagnostics.relatedInformation
-		);
+		this.hasConfigurationCapability = !!capabilities.workspace?.configuration;
+		this.hasWorkspaceFolderCapability = !!capabilities.workspace?.workspaceFolders;
+		this.hasDiagnosticRelatedInformationCapability = !!capabilities.textDocument?.publishDiagnostics?.relatedInformation;
 		const result: InitializeResult = {
 			capabilities: {
 				textDocumentSync: TextDocumentSyncKind.Incremental,
@@ -404,7 +396,7 @@ export class DocumentState {
 
 		if (this.fstar_lax) {
 			// Add diagnostics from the lax position that are after the part processed by the full process.
-			const lastPos = mkPosition(this.fstar.results.fragments.findLast(f => !f.invalidatedThroughEdits && f.ok !== undefined)?.range?.end || [1, 1]);
+			const lastPos = mkPosition(this.fstar.results.fragments.findLast(f => !f.invalidatedThroughEdits && f.ok !== undefined)?.range?.end ?? [1, 1]);
 			diags.push(...this.fstar_lax.results.diagnostics.filter(d => posLe(lastPos, d.range.start))
 				// Downgrade flycheck severity to warning
 				.map(diag => ({...diag, source: 'F* flycheck', ...(diag.severity === DiagnosticSeverity.Error && { severity: DiagnosticSeverity.Warning })})));
@@ -595,7 +587,7 @@ export class DocumentProcess {
 
 	private handleSingleFullBufferResponse(response: FullBufferQueryResponse, query: FullBufferQuery) {
 		if (response.kind === 'message' && response.level === 'progress') {
-			this.handleIdeProgress(response.contents as IdeProgress, query);
+			this.handleIdeProgress(response.contents, query);
 		} else if (response.kind === 'message' && response.level === 'info') {
 			console.info("Info: " + response.contents);
 		} else if (response.kind === 'message' && response.level === 'error') {
@@ -873,6 +865,7 @@ export class DocumentProcess {
 		}
 	}
 
+	// eslint-disable-next-line @typescript-eslint/require-await
 	async onDocumentRangeFormatting(formatParams: DocumentRangeFormattingParams) {
 		const text = this.currentDoc.getText(formatParams.range);
 		// call fstar.exe synchronously to format the text

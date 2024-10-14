@@ -164,17 +164,18 @@
 		"vscode:prepublish": "npm run compile",
 		"compile": "(cd client && npm run compile) && (cd server && npm run compile)",
 		"watch": "npm run compile",
-		"lint": "tsc --noEmit -p server/tsconfig.json && tsc --noEmit -p client/tsconfig.json && eslint ./client/src ./server/src --ext .ts,.tsx",
+		"lint": "tsc --noEmit -p server/tsconfig.json && tsc --noEmit -p client/tsconfig.json && eslint",
 		"postinstall": "cd client && npm install && cd ../server && npm install && cd ..",
 		"test": "cd server && npm test"
 	},
 	"devDependencies": {
-		"@types/node": "^16.11.7",
-		"@typescript-eslint/eslint-plugin": "^7.9.0",
-		"@typescript-eslint/parser": "^7.9.0",
-		"@vscode/vsce": "^2.26.1",
-		"esbuild": "^0.21.2",
-		"eslint": "^8.57.0",
-		"typescript": "^5.4.5"
+		"@eslint/js": "^9.12.0",
+		"@types/eslint__js": "^8.42.3",
+		"@types/node": "^16.18.113",
+		"@vscode/vsce": "^3.1.1",
+		"esbuild": "^0.24.0",
+		"eslint": "^9.12.0",
+		"typescript": "5.5.4",
+		"typescript-eslint": "^8.9.0"
 	}
 }

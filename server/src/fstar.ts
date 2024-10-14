@@ -72,7 +72,7 @@ export class FStar {
 			// If there are any slashes in the fstar.exe, turn it into an absolute
 			// path relative to the config's working directory. If it is already
 			// absolute, the working directory will be ignored.
-			if (fstar_exe_resolved.indexOf(path.sep) >= 0) {
+			if (fstar_exe_resolved.includes(path.sep)) {
 				fstar_exe_resolved = path.resolve(config.cwd, fstar_exe_resolved);
 			}
 			// Search in $PATH
@@ -100,7 +100,7 @@ export class FStar {
 	}
 
 	killZ3SubProcess(debug: boolean) {
-		if (!this.proc || !this.proc.pid) { return; }
+		if (!this.proc.pid) { return; }
 		pstree(this.proc.pid, (err, children) => {
 			if (err) { return; }
 			const z3Processes = children.filter(p => p.COMMAND.startsWith("z3"));
@@ -137,7 +137,7 @@ export class FStar {
 					if (Array.isArray(value)) {
 						return value.map(substituteEnvVarsInValue);
 					} else {
-						const result: { [key: string]: any } = {};
+						const result: Record<string, unknown> = {};
 						for (const [key, val] of Object.entries(value)) {
 							result[key] = substituteEnvVarsInValue(val);
 						}

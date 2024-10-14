@@ -168,28 +168,28 @@ export async function activate(context: ExtensionContext) {
 
 	// register a command for Ctrl+.
 	context.subscriptions.push(vscode.commands.registerTextEditorCommand('fstar-vscode-assistant/verify-to-position', textEditor =>
-		client.sendNotification(verifyToPositionNotification, {
+		void client.sendNotification(verifyToPositionNotification, {
 			uri: textEditor.document.uri.toString(),
 			lax: false,
 			position: textEditor.selection.active,
 		})));
 
 	context.subscriptions.push(vscode.commands.registerTextEditorCommand('fstar-vscode-assistant/restart', textEditor =>
-		client.sendNotification(restartNotification, { uri: textEditor.document.uri.toString() })));
+		void client.sendNotification(restartNotification, { uri: textEditor.document.uri.toString() })));
 
 	// register a command for Ctrl+Shift+.
 	context.subscriptions.push(vscode.commands.registerTextEditorCommand('fstar-vscode-assistant/lax-to-position', textEditor =>
-		client.sendNotification(verifyToPositionNotification, {
+		void client.sendNotification(verifyToPositionNotification, {
 			uri: textEditor.document.uri.toString(),
 			lax: true,
 			position: textEditor.selection.active,
 		})));
 
 	context.subscriptions.push(vscode.commands.registerTextEditorCommand('fstar-vscode-assistant/kill-and-restart-solver', textEditor =>
-		client.sendNotification(killAndRestartSolverNotification, { uri: textEditor.document.uri.toString() })));
+		void client.sendNotification(killAndRestartSolverNotification, { uri: textEditor.document.uri.toString() })));
 	
 	context.subscriptions.push(vscode.commands.registerTextEditorCommand('fstar-vscode-assistant/kill-all', () =>
-		client.sendNotification(killAllNotification, {})));
+		void client.sendNotification(killAllNotification, {})));
 
 	workspace.onDidChangeConfiguration((event) => {
 		const cfg = workspace.getConfiguration('fstarVSCodeAssistant');

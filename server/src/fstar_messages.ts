@@ -12,8 +12,7 @@ export interface ProtocolInfo {
 export function isProtocolInfo(object: any): boolean {
 	// We assume that the server is well-behaved and doesn't send ill-formed
 	// messages
-	return object
-		&& object.kind && object.kind === 'protocol-info';
+	return object?.kind === 'protocol-info';
 }
 
 // A position is a line number and a column number

@@ -81,7 +81,7 @@ export class FStarConnection {
 
 		// Wait for a second for processes to die before restarting the solver
 		await setTimeout(1000);
-		await this.restartSolverRequest();
+		this.restartSolverRequest();
 	}
 
 	// Gets the configuration for the F* process.
@@ -264,7 +264,7 @@ export class FStarConnection {
 		});
 	}
 
-	async restartSolverRequest() {
+	restartSolverRequest() {
 		const query = {
 			query: "restart-solver",
 			args: {}
@@ -356,7 +356,7 @@ export class FStarConnection {
 	// Note that this function is created as a closure to keep the buffer scoped
 	// only to this function. The factory function exists to make unit-testing
 	// easier (creating a new function is like resetting the closure state).
-	static bufferedMessageHandlerFactory(handler: (message: object) => void) {
+	static bufferedMessageHandlerFactory(handler: (message: any) => void) {
 		// Stateful buffer to store partial messages. Messages appear to be
 		// fragmented into 8192 byte chunks if they exceed this size.
 		let buffer = "";
@@ -364,7 +364,7 @@ export class FStarConnection {
 		return function (data: string) {
 			const lines = data.toString().split('\n');
 
-			const valid_messages: object[] = [];
+			const valid_messages: any[] = [];
 			for (const line of lines) {
 				if (FStarConnection.is_valid_fstar_message(line)) {
 					// We assume that fragmented messages will always be read

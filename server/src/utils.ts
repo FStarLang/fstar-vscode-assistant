@@ -52,7 +52,7 @@ export function posLe(a: Position, b: Position) {
 export async function checkFileInDirectory(dirPath: string, filePath: string): Promise<boolean> {
 	// Check if dirPath is a directory using fs.stat()
 	const stats = await util.promisify(fs.stat)(dirPath);
-	if (!stats || !stats.isDirectory()) {
+	if (!stats?.isDirectory()) {
 		//console.log(dirPath + ' is not a directory');
 		return false;
 	}
