@@ -3,7 +3,7 @@
 The diagram below presents a high-level overview of the design of this extension.
 
 ```
-                                Client                           Server                       F* processes
+                                Extension                      LSP Server                     F* processes
                        vscode-languageclient/node        vscode-languageserver/node             Native F*
                                                                                               ___________
   .---------.  events      .---------------.               .---------------.                 |_fstar.exe_|_   
@@ -14,12 +14,12 @@ The diagram below presents a high-level overview of the design of this extension
 
 ## Workflow
 
-* The editor starts the client on an initialization event
+* The editor starts the extension on an initialization event
 
-* The client launches a language server, implemented in server.ts, executing on the nodejs server runtime.
-  The client and server interact using Language Server Protocol (LSP).
+* The extension launches a language server, implemented in server.ts, executing on the nodejs server runtime.
+  The extension and server interact using Language Server Protocol (LSP).
   
-* For each F* document opened by the editor, the server launches multiple fstar.exe processes.
+* For each F* document opened by the editor, the LSP server launches multiple fstar.exe processes.
   F* implements its own IDE protocol, designed first for use by F*'s emacs mode, fstar-mode.el.
   We reuse that protocol to communicate between server.ts and fstar.exe,
   communicating using JSON-formatted IDE messages over stdin/stdout.
@@ -106,26 +106,13 @@ requests to check fragments of the document whose position is at `p` or beyond.
 ## Events from server.ts to extension.ts
 
 In addition to standard LSP diagnostics, hover events, definitions, completions etc., 
-we have the following four custom messages send from server.ts to client.ts
-
-* `fstar-vscode-extension/statusStarted`: A message to show which fragment of the document
-   is currently being processed by `fstar_ide`, used to show hourglass icons.
-
-* `fstar-vscode-extension/statusOk`: A message to show which fragment of the document was checked,
-   either fully checked or lax checked, showing either checkmarks or question marks
-   in the gutter.
-		
-* `fstar-vscode-extension/statusClear`: A message to clear all gutter icons.
-
-* `fstar-vscode-extension/statusFailed`: A message to indicate that checking has failed on a fragment,
-   which causes the extension to clear any hourglass icons that remain.
+we have custom messages, see `fstarLspExtensions.ts` for details.
 
 # Publishing an extension
 
 The extension is automatically published by CI if you push a release:
 1. `npx vsce package minor` to bump the version and create a release tag.
 2. `git push --follow-tags` to push the release.
-
 
 If you want to build the extension for local testing,
 you can create a `.vsix` using `npx vsce package`.

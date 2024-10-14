@@ -9,7 +9,7 @@ export default tseslint.config(
     languageOptions: {
       parserOptions: {
         projectService: {
-          allowDefaultProject: ['server/tests/*.ts', '*.mjs'],
+          allowDefaultProject: ['lspserver/tests/*.ts', '*.mjs'],
           defaultProject: 'tsconfig.json',
         },
         // @ts-expect-error expected

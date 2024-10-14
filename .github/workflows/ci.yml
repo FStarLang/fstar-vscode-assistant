@@ -34,7 +34,7 @@ jobs:
         run: npx vsce package
 
       - name: Package LSP server
-        run: cp server/out/main.js "fstar-language-server-$(jq -r .version package.json).js"
+        run: cp lspserver/out/main.js "fstar-language-server-$(jq -r .version package.json).js"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

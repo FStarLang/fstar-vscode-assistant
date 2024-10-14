@@ -1,5 +1,5 @@
 {
-	"name": "fstar-vscode-assistant-client",
+	"name": "fstar-vscode-extension",
 	"description": "VSCode part of fstar-vscode-assistant",
 	"author": "Microsoft Corporation",
 	"license": "MIT",
