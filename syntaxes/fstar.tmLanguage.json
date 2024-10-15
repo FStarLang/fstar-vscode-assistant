@@ -41,6 +41,14 @@
 				}
 			]
 		},
+		"escapehatch": {
+			"patterns": [
+				{
+					"name": "invalid.illegal.fstar",
+					"match": "\\b(admit|assume|magic|unsafe_coerce|assume_)\\b"
+				}
+			]
+		},
 		"commentblock": {
 			"patterns": [
 				{
@@ -105,6 +113,9 @@
 				},
 				{
 					"include": "#characters"
+				},
+				{
+					"include": "#escapehatch"
 				},
 				{
 					"include": "#dsl"
