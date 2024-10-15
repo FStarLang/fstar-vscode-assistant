@@ -33,7 +33,7 @@ import * as cp from 'child_process';
 import { defaultSettings, fstarVSCodeAssistantSettings } from './settings';
 import { formatIdeProofState, fstarPosLe, fstarRangeAsRange, mkPosition, posAsFStarPos, posLe, rangeAsFStarRange } from './utils';
 import { FStarConnection } from './fstar_connection';
-import { FStar, FStarConfig } from './fstar';
+import { FStar, FStarConfig, JsonlInterface } from './fstar';
 import { FStarRange, IdeProofState, IdeProgress, IdeDiagnostic, FullBufferQueryResponse, FStarPosition, FullBufferQuery } from './fstar_messages';
 import * as path from 'path';
 import { pathToFileURL } from 'url';
@@ -865,34 +865,21 @@ export class DocumentProcess {
 		}
 	}
 
-	// eslint-disable-next-line @typescript-eslint/require-await
 	async onDocumentRangeFormatting(formatParams: DocumentRangeFormattingParams) {
 		const text = this.currentDoc.getText(formatParams.range);
-		// call fstar.exe synchronously to format the text
-		const format_query = {
-			"query-id": "1",
-			query: "format",
-			args: {
-				code: text
+		const debug = false;
+		const fstarFormatter = FStar.trySpawnFstar(this.fstarConfig, 'Prims.fst', debug);
+		if (!fstarFormatter) return [];
+		let formattedCode: string | undefined;
+		fstarFormatter.handleResponse = reply => {
+			if (reply.response && reply.status == "success" || reply.response["formatted-code"]) {
+				formattedCode = reply.response['formatted-code'];
 			}
 		};
-		// TODO(klinvill): This interaction with the F* executable should be moved to the FStar class or file.
-		const fstarFormatter =
-			cp.spawnSync(this.fstarConfig.fstar_exe ?? "fstar.exe",
-				["--ide", "prims.fst"],
-				{ input: JSON.stringify(format_query) });
-		const data = fstarFormatter.stdout.toString();
-		const replies = data.trim().split('\n').map(line => { return JSON.parse(line); });
-		if (replies.length != 2 ||
-			replies[0].kind != "protocol-info" ||
-			replies[1].kind != "response" ||
-			!replies[1].response ||
-			replies[1].status != "success" ||
-			!replies[1].response["formatted-code"]) {
-			return [];
-		}
-		const formattedCode = replies[1].response["formatted-code"];
-		return [TextEdit.replace(formatParams.range, formattedCode)];
+		fstarFormatter.jsonlIface.sendMessage({ 'query-id': '1', query: 'format', args: { code: text } });
+		fstarFormatter.proc.stdin?.end();
+		const exitCode = await new Promise(resolve => fstarFormatter.proc.on('close', resolve));
+		return formattedCode ? [TextEdit.replace(formatParams.range, formattedCode)] : [];
 	}
 
 	async killAndRestartSolver() {
