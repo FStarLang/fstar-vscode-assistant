@@ -19,17 +19,23 @@ import { checkFileInDirectory, findFilesByExtension, getEnclosingDirectories } f
 
 // FStar executable
 export class FStar {
-	proc: cp.ChildProcess;
-	config: FStarConfig;
-	// Indicates whether the F* process supports full-buffer mode
-	supportsFullBuffer: boolean;
-	lax: boolean;
+	jsonlIface: JsonlInterface;
 
-	constructor(proc: cp.ChildProcess, config: FStarConfig, supportsFullBuffer: boolean, lax: boolean) {
-		this.proc = proc;
-		this.config = config;
-		this.supportsFullBuffer = supportsFullBuffer;
-		this.lax = lax;
+	public handleResponse: (msg: any) => void = () => {};
+
+	constructor(
+			public proc: cp.ChildProcess,
+			public config: FStarConfig,
+			// Indicates whether the F* process supports full-buffer mode
+			public supportsFullBuffer: boolean,
+			public lax: boolean,
+		) {
+		this.jsonlIface =
+			new JsonlInterface(
+				msg => this.handleResponse(msg),
+				chunk => this.proc.stdin?.write(chunk),
+			);
+		this.proc.stdout?.on('data', chunk => this.jsonlIface.onChunkReceived(chunk));
 	}
 
 	// Tries to spawn an fstar.exe process using the given configuration and
@@ -87,6 +93,8 @@ export class FStar {
 			options,
 			{ cwd: config.cwd }
 		);
+
+		proc.stdin?.setDefaultEncoding('utf-8');
 
 		return new FStar(proc, config, supportsFullBuffer, !!lax);
 	}
@@ -248,4 +256,32 @@ export interface FStarConfig {
 	options?: string[];      // other options to be passed to fstar.exe
 	fstar_exe?: string;       // path to fstar.exe
 	cwd?: string;            // working directory for fstar.exe (usually not specified; defaults to workspace root)
+}
+
+export class JsonlInterface {
+	private buffer = '';
+	constructor(
+		public onMessageReceived: (_: any) => void,
+		public sendChunk: (_: string) => void,
+	) {}
+
+	onChunkReceived(chunk: Buffer | string) {
+		this.buffer = this.buffer + chunk.toString();
+
+		while (true) {
+			const i = this.buffer.indexOf('\n');
+			if (i < 0) break;
+			const msgJson = this.buffer.slice(0, i);
+			this.buffer = this.buffer.slice(i + 1);
+			try {
+				this.onMessageReceived(JSON.parse(msgJson));
+			} catch (e) {
+				console.log('failed to handle message', msgJson, e);
+			}
+		}
+	}
+
+	sendMessage(msg: any) {
+		this.sendChunk(JSON.stringify(msg) + '\n');
+	}
 }

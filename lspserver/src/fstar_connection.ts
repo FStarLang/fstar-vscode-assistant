@@ -40,19 +40,7 @@ export class FStarConnection {
 	onFullBufferResponse: (msg: any, query: FullBufferQuery) => void = _ => {};
 
 	constructor(private fstar: FStar, public debug: boolean) {
-		// TODO(klinvill): Should try to spawn F* from within this constructor
-		// instead.
-		this.fstar.proc.stdin?.setDefaultEncoding('utf-8');
-
-		// Register message handlers that will resolve the appropriate pending
-		// response promises for each query.
-		//
-		// The bufferedHandler buffers up received input until it finds a valid
-		// message. The wrapped handler will then be called with the parsed
-		// valid message. This handles receiving fragmented messages or multiple
-		// messages over the stream from the F* process.
-		const bufferedHandler = FStarConnection.bufferedMessageHandlerFactory((msg: object) => this.handleResponse(msg));
-		this.fstar.proc.stdout?.on('data', bufferedHandler);
+		this.fstar.handleResponse = msg => this.handleResponse(msg);
 
 		// F* error messages are just printed out
 		const fstar_proc_name = this.fstar.lax ? 'fstar lax' : 'fstar';
@@ -94,8 +82,7 @@ export class FStarConnection {
 	////////////////////////////////////////////////////////////////////////////////////
 
 	private sendLineNow(msg: any) {
-		const text = JSON.stringify(msg);
-		if (this.debug) console.log(">>> " + text);
+		if (this.debug) console.log(">>> " + JSON.stringify(msg));
 
 		if (this.fstar.proc.exitCode != null) {
 			const process_name = this.fstar.lax ? "flycheck" : "checker";
@@ -104,7 +91,7 @@ export class FStarConnection {
 		}
 
 		try {
-			this.fstar.proc?.stdin?.write(text + '\n');
+			this.fstar.jsonlIface.sendMessage(msg);
 		} catch (e) {
 			const msg = "ERROR: Error writing to F* process: " + e;
 			throw new Error(msg);
@@ -345,77 +332,6 @@ export class FStarConnection {
 		if (!pi.features.includes("full-buffer")) {
 			this.fstar.supportsFullBuffer = false;
 			console.error("fstar.exe does not support full-buffer queries.");
-		}
-	}
-
-	// Returns a message handler meant to run on top of a `Stream`'s 'data'
-	// handler. This handler will buffer received data to handle fragmented
-	// messages. It will invoke the given `handler` on each received valid F*
-	// message.
-	//
-	// Note that this function is created as a closure to keep the buffer scoped
-	// only to this function. The factory function exists to make unit-testing
-	// easier (creating a new function is like resetting the closure state).
-	static bufferedMessageHandlerFactory(handler: (message: any) => void) {
-		// Stateful buffer to store partial messages. Messages appear to be
-		// fragmented into 8192 byte chunks if they exceed this size.
-		let buffer = "";
-
-		return function (data: string) {
-			const lines = data.toString().split('\n');
-
-			const valid_messages: any[] = [];
-			for (const line of lines) {
-				if (FStarConnection.is_valid_fstar_message(line)) {
-					// We assume that fragmented messages will always be read
-					// sequentially. This is a reasonable assumption to make since
-					// messages should be delivered over a local IO stream (which is
-					// FIFO and provides reliable delivery) from a single-threaded
-					// F* IDE process. Because of this assumption, receiving a
-					// non-fragmented message while the buffer is non-empty implies
-					// that some error occured before the process could finish
-					// sending a message, so the buffer is discarded.
-					if (buffer !== "") {
-						console.warn("Partially buffered message discarded: " + buffer);
-					}
-					buffer = "";
-					// Valid messages are valid JSON objects
-					valid_messages.push(JSON.parse(line));
-				} else {
-					// We assume that invalid messages are just message fragments.
-					// We therefore add this fragment to the buffer until the full
-					// message is received.
-					buffer += line;
-					// The message fragment we received may be the last fragment
-					// needed to complete a message. We therefore check here to see
-					// if the buffer constitutes a valid message.
-					if (FStarConnection.is_valid_fstar_message(buffer)) {
-						// Valid messages are valid JSON objects
-						valid_messages.push(JSON.parse(buffer));
-						buffer = "";
-					}
-				}
-			}
-
-			// Invoke the message handler for each received message in-order
-			valid_messages.forEach(message => handler(message));
-		};
-	}
-
-	// All messages from F* are expected to be valid JSON objects.
-	//
-	// TODO(klinvill): this should likely be refactored into `fstar_messages.ts` and
-	// potentially check the structure of a message, not just that it's valid JSON. A
-	// better method could return either the appropriate message object, or an error
-	// otherwise, so that the parsing could be moved out of these handlers and into
-	// the same file as the message definitions.
-	private static is_valid_fstar_message(entry: string): boolean {
-		try {
-			JSON.parse(entry);
-			return true;
-		}
-		catch (err) {
-			return false;
 		}
 	}
 }
