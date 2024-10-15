@@ -34,6 +34,12 @@ export default tseslint.config(
       '@typescript-eslint/no-unsafe-member-access': 0,
       '@typescript-eslint/no-unsafe-argument': 0,
       '@typescript-eslint/no-unsafe-call': 0,
-    },
-  }
+    }
+  },
+  {
+    ignores: [
+      "*/out/**",
+      "**/node_modules/**",
+    ]
+  },
 );
