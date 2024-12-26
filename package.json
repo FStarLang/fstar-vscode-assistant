@@ -49,7 +49,13 @@
 						"filenamePattern": "*.fst.checked"
 					},
 					{
+						"filenamePattern": "*.fst.checked.lax"
+					},
+					{
 						"filenamePattern": "*.fsti.checked"
+					},
+					{
+						"filenamePattern": "*.fsti.checked.lax"
 					}
 				]
 			},
