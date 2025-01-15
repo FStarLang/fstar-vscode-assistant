@@ -39,6 +39,8 @@ import * as path from 'path';
 import { pathToFileURL } from 'url';
 import { statusNotification, FragmentStatus, killAndRestartSolverNotification, restartNotification, verifyToPositionNotification, killAllNotification } from './fstarLspExtensions';
 import { Debouncer, RateLimiter } from './signals';
+import * as util from 'util';
+import * as fs from 'fs';
 
 // LSP Server
 //
@@ -605,7 +607,7 @@ export class DocumentProcess {
 			if (!response.response) {
 				console.info("Query cancelled");
 			} else if (Array.isArray(response.response)) {
-				this.handleIdeDiagnostics(response.response);
+				void this.handleIdeDiagnostics(response.response);
 			} else {
 				// ignore
 			}
@@ -614,20 +616,22 @@ export class DocumentProcess {
 		}
 	}
 
-	qualifyFilename(fname: string, textdocUri: string): string {
-		if (fname != "<input>") {
-			// if we have a relative path, then qualify it to the base of the
-			// F* process's cwd
-			const base = this.fstar.fstar_config().cwd;
-			if (!path.isAbsolute(fname) && base) {
-				//concate the base and the relative path
-				return pathToFileURL(path.join(base, fname)).toString();
-			}
-			else {
-				return pathToFileURL(fname).toString();
-			}
+	async qualifyFilename(fname: string, textdocUri: string): Promise<string> {
+		if (fname === '<input>') return textdocUri;
+
+		// if we have a relative path, then qualify it to the base of the
+		// F* process's cwd
+		const base = this.fstar.fstar_config().cwd;
+		if (!path.isAbsolute(fname) && base) {
+			fname = path.join(base, fname);
 		}
-		return textdocUri;
+
+		// Resolve symlinks in the path.
+		// VS Code does not resolve symlinks itself,
+		// and go-to-definition etc. would go to files like stage2/out/lib/fstar/ulib/Prims.fst
+		fname = await util.promisify(fs.realpath)(fname);
+
+		return pathToFileURL(fname).toString();
 	}
 
 	private handleIdeProofState(response: IdeProofState) {
@@ -735,7 +739,7 @@ export class DocumentProcess {
 		}
 	}
 
-	ideDiagAsDiag(diag: IdeDiagnostic): Diagnostic {
+	async ideDiagAsDiag(diag: IdeDiagnostic): Promise<Diagnostic> {
 		function ideErrorLevelAsDiagnosticSeverity(level: string): DiagnosticSeverity {
 			switch (level) {
 				case "warning": return DiagnosticSeverity.Warning;
@@ -763,18 +767,18 @@ export class DocumentProcess {
 			severity: ideErrorLevelAsDiagnosticSeverity(diag.level),
 			source: 'F*',
 			range: mainRange,
-			relatedInformation: ranges.map(rng => ({
+			relatedInformation: await Promise.all(ranges.map(async rng => ({
 				location: {
-					uri: this.qualifyFilename(rng.fname, this.uri),
+					uri: await this.qualifyFilename(rng.fname, this.uri),
 					range: fstarRangeAsRange(rng),
 				},
 				message: 'related location',
-			})),
+			}))),
 		};
 	}
 
-	private handleIdeDiagnostics(response: IdeDiagnostic[]) {
-		(this.newResults ?? this.results).diagnostics.push(...response.map(diag => this.ideDiagAsDiag(diag)));
+	private async handleIdeDiagnostics(response: IdeDiagnostic[]) {
+		(this.newResults ?? this.results).diagnostics.push(...await Promise.all(response.map(diag => this.ideDiagAsDiag(diag))));
 		this.documentState.sendDiags();
 	}
 
@@ -851,14 +855,14 @@ export class DocumentProcess {
 			}
 			const range = fstarRangeAsRange(defined_at);
 			return [{
-				targetUri: this.qualifyFilename(defined_at.fname, this.currentDoc.uri),
+				targetUri: await this.qualifyFilename(defined_at.fname, this.currentDoc.uri),
 				targetRange: range,
 				targetSelectionRange: range,
 			}];
 		} else if (result.response.kind === 'module') {
 			const range: Range = {start: {line: 0, character: 0}, end: {line: 0, character: 0}};
 			return [{
-				targetUri: this.qualifyFilename(result.response.path, this.currentDoc.uri),
+				targetUri: await this.qualifyFilename(result.response.path, this.currentDoc.uri),
 				targetRange: range,
 				targetSelectionRange: range,
 			}];
