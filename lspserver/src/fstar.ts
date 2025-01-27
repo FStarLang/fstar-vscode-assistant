@@ -61,6 +61,10 @@ export class FStar {
 		if (config.include_dirs) {
 			config.include_dirs.forEach((dir) => { options.push("--include"); options.push(dir); });
 		}
+		if (!config.include_dirs || config.include_dirs.length === 0) {
+			options.push("--include");
+			options.push(path.dirname(filePath));
+		}
 		if (!config.fstar_exe) {
 			config.fstar_exe = "fstar.exe";
 		}
