@@ -767,7 +767,7 @@ export class DocumentProcess {
 			severity: ideErrorLevelAsDiagnosticSeverity(diag.level),
 			source: 'F*',
 			range: mainRange,
-			relatedInformation: await Promise.all(ranges.map(async rng => ({
+			relatedInformation: await Promise.all(ranges.filter(rng => !isDummyRange(rng)).map(async rng => ({
 				location: {
 					uri: await this.qualifyFilename(rng.fname, this.uri),
 					range: fstarRangeAsRange(rng),
