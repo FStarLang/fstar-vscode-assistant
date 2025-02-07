@@ -626,10 +626,15 @@ export class DocumentProcess {
 			fname = path.join(base, fname);
 		}
 
-		// Resolve symlinks in the path.
-		// VS Code does not resolve symlinks itself,
-		// and go-to-definition etc. would go to files like stage2/out/lib/fstar/ulib/Prims.fst
-		fname = await util.promisify(fs.realpath)(fname);
+		try {
+			// Resolve symlinks in the path.
+			// VS Code does not resolve symlinks itself,
+			// and go-to-definition etc. would go to files like stage2/out/lib/fstar/ulib/Prims.fst
+			fname = await util.promisify(fs.realpath)(fname);
+		} catch {
+			// fs.realpath fails if the file no longer exists
+			// https://github.com/FStarLang/fstar-vscode-assistant/issues/53
+		}
 
 		return pathToFileURL(fname).toString();
 	}
