@@ -38,7 +38,9 @@ ${escape(this.stdout)}
 abstract class CommandOutputProvider implements CustomReadonlyEditorProvider<CommandOutputDocument> {
 	async openCustomDocument(uri: Uri): Promise<CommandOutputDocument> {
 		const cmd = this.getCommand(uri);
-		const out = await util.promisify(cp.execFile)(cmd[0], cmd.slice(1));
+		const out = await util.promisify(cp.execFile)(cmd[0], cmd.slice(1), {
+			maxBuffer: 50*1024*1024, // allow up to 50 megabytes of output
+		});
 		return new CommandOutputDocument(uri, cmd.join(' '), out.stdout, out.stderr);
 	}
 	resolveCustomEditor(document: CommandOutputDocument, webviewPanel: WebviewPanel) {
