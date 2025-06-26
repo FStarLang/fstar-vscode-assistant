@@ -82,7 +82,7 @@
 						"1": {"name": "keyword.dsl.fstar"}
 					},
 					"patterns": [
-						{ "name": "keyword.control.fstar.pulse", "match": "\\b(mut|invariant|while|fn|parallel|each|rewrite|fold|atomic|ghost|with_invariants|opens|show_proof_state)\\b" },
+						{ "name": "keyword.control.fstar.pulse", "match": "\\b(mut|invariant|while|fn|parallel|each|rewrite|fold|atomic|ghost|with_invariants|opens|show_proof_state|preserves)\\b" },
 						{ "include": "#fstar" }
 					],
 					"end": "(?=#lang-.*)"
