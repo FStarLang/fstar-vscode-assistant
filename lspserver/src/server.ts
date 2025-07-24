@@ -18,6 +18,7 @@ import {
 	TextEdit,
 	Connection,
 	DiagnosticSeverity,
+	PublishDiagnosticsParams,
 } from 'vscode-languageserver/node';
 
 import {
@@ -37,7 +38,7 @@ import { FStar, FStarConfig, JsonlInterface } from './fstar';
 import { FStarRange, IdeProofState, IdeProgress, IdeDiagnostic, FullBufferQueryResponse, FStarPosition, FullBufferQuery } from './fstar_messages';
 import * as path from 'path';
 import { pathToFileURL } from 'url';
-import { statusNotification, FragmentStatus, killAndRestartSolverNotification, restartNotification, verifyToPositionNotification, killAllNotification } from './fstarLspExtensions';
+import { statusNotification, FragmentStatus, killAndRestartSolverNotification, restartNotification, verifyToPositionNotification, killAllNotification, StatusNotificationParams } from './fstarLspExtensions';
 import { Debouncer, RateLimiter } from './signals';
 import * as util from 'util';
 import * as fs from 'fs';
@@ -160,10 +161,7 @@ export class Server {
 		this.configurationSettings = settings;
 
 		// FStarConnection objects store their own debug flag, so we need to update them all with the latest value.
-		this.documentStates.forEach((docState, uri) => {
-			docState.fstar.fstar.debug = settings.debug;
-			if (docState.fstar_lax) docState.fstar_lax.fstar.debug = settings.debug;
-		});
+		this.documentStates.forEach((docState) => docState.setDebug(!!settings.debug));
 	}
 
 	async refreshDocumentState(uri: string) {
@@ -177,7 +175,11 @@ export class Server {
 		if (!fstar) return;
 		const fstar_lax = this.configurationSettings.flyCheck ? FStarConnection.tryCreateFStarConnection(fstar_config, filePath, this.configurationSettings.debug, 'lax') : undefined;
 
-		const docState = new DocumentState(doc, fstar_config, this, fstar, fstar_lax);
+		const eventHandlers: DocumentStateEventHandlers = {
+			sendDiagnostics: (params) => void this.connection.sendDiagnostics(params),
+			sendStatus: (params) => void this.connection.sendNotification(statusNotification, params),
+		};
+		const docState = new FStarDocumentState(doc, fstar_config, eventHandlers, fstar, fstar_lax);
 		this.documentStates.set(uri, docState);
 	}
 
@@ -253,11 +255,10 @@ export class Server {
 
 		// And ask the main fstar process to verify it
 		if (this.configurationSettings.verifyOnOpen) {
-			docState.fstar.validateFStarDocument('full');
+			docState.verifyAll();
+		} else {
+			docState.verifyAll({flycheckOnly: true});
 		}
-
-		// And ask the lax fstar process to verify it
-		docState.fstar_lax?.validateFStarDocument('lax');
 	}
 
 	private async onRestartRequest(uri: string) {
@@ -266,7 +267,7 @@ export class Server {
 		this.documentStates.delete(uri);
 		await this.refreshDocumentState(uri);
 		// And ask the lax fstar process to verify it
-		this.getDocumentState(uri)?.fstar_lax?.validateFStarDocument('lax');
+		this.getDocumentState(uri)?.verifyAll({flycheckOnly: true});
 	}
 
 	private onKillAllRequest() {
@@ -301,7 +302,26 @@ function findWordAtPosition(doc: TextDocument, position: Position): WordAndRange
 	return { word: word, range: rangeAsFStarRange(range) };
 }
 
-export class DocumentState {
+export interface DocumentStateEventHandlers {
+	sendDiagnostics(params: PublishDiagnosticsParams): void;
+	sendStatus(params: StatusNotificationParams): void;
+}
+
+export interface DocumentState {
+	dispose(): void;
+	setDebug(debug: boolean): void;
+	changeDoc(newDoc: TextDocument): void;
+	verifyAll(params?: {flycheckOnly?: boolean}): void;
+	verifyToPosition(position: Position): void;
+	laxToPosition(position: Position): void;
+	onCompletion(textDocumentPosition: TextDocumentPositionParams): Promise<CompletionItem[] | undefined>;
+	onHover(textDocumentPosition: TextDocumentPositionParams): Promise<Hover | undefined>;
+	onDefinition(defParams: DefinitionParams): Promise<LocationLink[] | undefined>;
+	onDocumentRangeFormatting(formatParams: DocumentRangeFormattingParams): Promise<TextEdit[]>;
+	killAndRestartSolver(): Promise<void>;
+}
+
+export class FStarDocumentState implements DocumentState {
 	uri: string;
 
 	// The main fstar.exe process for verifying the current document
@@ -315,12 +335,17 @@ export class DocumentState {
 
 	constructor(currentDoc: TextDocument,
 			public fstarConfig: FStarConfig,
-			public server: Server,
+			public events: DocumentStateEventHandlers,
 			fstar: FStarConnection,
 			fstar_lax?: FStarConnection) {
 		this.uri = currentDoc.uri;
 		this.fstar = new DocumentProcess(currentDoc, fstarConfig, this, false, fstar);
 		this.fstar_lax = fstar_lax && new DocumentProcess(currentDoc, fstarConfig, this, true, fstar_lax);
+	}
+
+	setDebug(debug: boolean): void {
+		this.fstar.fstar.debug = debug;
+		if (this.fstar_lax) this.fstar_lax.fstar.debug = debug;
 	}
 
 	dispose() {
@@ -329,11 +354,11 @@ export class DocumentState {
 		this.fstar_lax?.dispose();
 
 		// Clear all diagnostics for a document when it is closed
-		void this.server.connection.sendDiagnostics({
+		this.events.sendDiagnostics({
 			uri: this.uri,
 			diagnostics: [],
 		});
-		void this.server.connection.sendNotification(statusNotification, {
+		this.events.sendStatus({
 			uri: this.uri,
 			fragments: [],
 		});
@@ -349,8 +374,8 @@ export class DocumentState {
 		return this.fstar.findIdeProofStateAtLine(position);
 	}
 
-	verifyAll() {
-		this.fstar.validateFStarDocument('full');
+	verifyAll(params?: { flycheckOnly?: boolean }) {
+		if (!params?.flycheckOnly) this.fstar.validateFStarDocument('full');
 		this.fstar_lax?.validateFStarDocument('lax');
 	}
 
@@ -404,7 +429,7 @@ export class DocumentState {
 				.map(diag => ({...diag, source: 'F* flycheck', ...(diag.severity === DiagnosticSeverity.Error && { severity: DiagnosticSeverity.Warning })})));
 		}
 
-		void this.server.connection.sendDiagnostics({
+		this.events.sendDiagnostics({
 			uri: this.uri,
 			diagnostics: diags,
 		});
@@ -438,7 +463,7 @@ export class DocumentState {
 			});
 		}
 
-		void this.server.connection.sendNotification(statusNotification, {
+		this.events.sendStatus({
 			uri: this.uri,
 			fragments: statusFragments,
 		});
@@ -514,7 +539,7 @@ export class DocumentProcess {
 	
 	constructor(public currentDoc: TextDocument,
 			public fstarConfig: FStarConfig,
-			public documentState: DocumentState,
+			public documentState: FStarDocumentState,
 			public lax: boolean,
 			public fstar: FStarConnection) {
 		this.uri = currentDoc.uri;
