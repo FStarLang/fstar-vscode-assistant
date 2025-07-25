@@ -20,6 +20,7 @@ export default tseslint.config(
   {
     rules: {
       'semi': [2, "always"],
+      'no-empty': 0,
       '@typescript-eslint/no-unused-vars': 0,
       '@typescript-eslint/no-explicit-any': 0,
       '@typescript-eslint/explicit-module-boundary-types': 0,

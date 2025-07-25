@@ -30,7 +30,7 @@ interface fstarVSCodeAssistantSettings {
 
 let fstarVSCodeAssistantSettings: fstarVSCodeAssistantSettings = {
 	verifyOnOpen: false,
-	verifyOnSave: true,
+	verifyOnSave: false,
 	flyCheck: true,
 	debug: false,
 	showLightCheckIcon: true
@@ -149,11 +149,14 @@ export async function activate(context: ExtensionContext) {
 	};
 
 	// Options to control the language client
-	const clientOptions: LanguageClientOptions = {
+	const clientOptions = {
 		// Register the server for plain text documents
 		documentSelector: [{ scheme: 'file', language: 'fstar'}],
 		diagnosticCollectionName: 'fstar',
 	};
+
+	const c2PulseGate = !!workspace.getConfiguration('fstarVSCodeAssistant').get<boolean>('c2pulse', false);
+	if (c2PulseGate) clientOptions.documentSelector?.push({ scheme: 'file', language: 'c' });
 
 	// Create the language client and start the client.
 	client = new LanguageClient(

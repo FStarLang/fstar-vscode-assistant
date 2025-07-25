@@ -13,6 +13,7 @@ import { defaultSettings, fstarVSCodeAssistantSettings } from './settings';
 import { FStar } from './fstar';
 import { statusNotification, killAndRestartSolverNotification, restartNotification, verifyToPositionNotification, killAllNotification } from './fstarLspExtensions';
 import { DocumentState, DocumentStateEventHandlers, FStarDocumentState } from './documentState';
+import { CDocumentState } from './cDocumentState';
 
 // LSP Server
 //
@@ -64,8 +65,10 @@ export class Server {
 			this.getDocumentState(change.document.uri)?.changeDoc(change.document));
 
 		this.documents.onDidSave(change => {
+			const docState = this.getDocumentState(change.document.uri);
 			if (this.configurationSettings.verifyOnSave) {
-				this.getDocumentState(change.document.uri)?.verifyAll();
+				// TODO: sequence with c2pulse
+				docState?.verifyAll();
 			}
 		});
 
@@ -148,11 +151,14 @@ export class Server {
 		const fstar_config = await FStar.getFStarConfig(filePath,
 			this.workspaceFolders, this.connection, this.configurationSettings);
 
-		const docState = FStarDocumentState.make(doc, fstar_config, this.eventHandlers,
-			this.configurationSettings);
-		if (!docState) return;
-
-		this.documentStates.set(uri, docState);
+		if (filePath.endsWith('.c') || filePath.endsWith('.h')) {
+			const docState = new CDocumentState(doc, fstar_config, this.eventHandlers, this.configurationSettings);
+			if (docState) this.documentStates.set(uri, docState);
+		} else {
+			const docState = FStarDocumentState.make(doc, fstar_config, this.eventHandlers,
+				this.configurationSettings);
+			if (docState) this.documentStates.set(uri, docState);
+		}
 	}
 
 	// Initialization of the LSP server: Called once when the workspace is opened
