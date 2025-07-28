@@ -61,6 +61,7 @@ export class FStarConnection {
 
 	// Kills the F* process and closes the connection
 	close() {
+		this.fstar.proc.stdin?.end();
 		this.fstar.proc.kill();
 	}
 
