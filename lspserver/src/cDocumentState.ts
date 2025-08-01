@@ -264,6 +264,7 @@ export class CDocumentState implements DocumentState {
 
 		let lastBefore: SourceRangeInfoItem | undefined;
 		for (const item of this.sourceRangeInfo ?? []) {
+			if (item.cRange.fileName !== this.cPath) continue;
 			if (smPosLe(item.pulseRange.start, smPos)) {
 				if (lastBefore === undefined || smPosLe(lastBefore.pulseRange.start, item.pulseRange.start)) {
 					lastBefore = item;
@@ -283,6 +284,7 @@ export class CDocumentState implements DocumentState {
 
 		let smallestEnclosing: SourceRangeInfoItem | undefined;
 		for (const item of this.sourceRangeInfo ?? []) {
+			if (item.cRange.fileName !== this.cPath) continue;
 			if (smPosLe(item.pulseRange.start, smRange.start) && smPosLe(smRange.end, item.pulseRange.end)) {
 				if (smallestEnclosing === undefined || smRangeSize(item.pulseRange) < smRangeSize(smallestEnclosing.pulseRange)) {
 					smallestEnclosing = item;
