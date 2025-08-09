@@ -14,7 +14,7 @@ import {
 	Range,
 	Position
 } from 'vscode-languageclient/node';
-import { StatusNotificationParams, killAllNotification, killAndRestartSolverNotification, restartNotification, statusNotification, verifyToPositionNotification } from './fstarLspExtensions';
+import { StatusNotificationParams, getTranslatedFstRequest, killAllNotification, killAndRestartSolverNotification, restartNotification, statusNotification, verifyToPositionNotification } from './fstarLspExtensions';
 import { CheckedFileEditorProvider, KrmlFileEditorProvider } from './binaryeditors';
 
 let client: LanguageClient;
@@ -193,6 +193,20 @@ export async function activate(context: ExtensionContext) {
 	
 	context.subscriptions.push(vscode.commands.registerTextEditorCommand('fstar-vscode-assistant/kill-all', () =>
 		void client.sendNotification(killAllNotification, {})));
+
+	context.subscriptions.push(vscode.commands.registerTextEditorCommand('fstar-vscode-assistant/switch-to-translated-fst', textEditor =>
+		void client.sendRequest(getTranslatedFstRequest, {
+			uri: textEditor.document.uri.toString(),
+			position: textEditor.selection.active,
+		}).then(async translatedPos => {
+			if (!translatedPos) return;
+			const textDoc = await workspace.openTextDocument(vscode.Uri.parse(translatedPos.uri));
+			const editor = await vscode.window.showTextDocument(textDoc);
+			const pos = posToCode(translatedPos.position);
+			const range = new vscode.Range(pos, pos);
+			editor.selections = [new vscode.Selection(pos, pos)];
+			editor.revealRange(range);
+		})));
 
 	workspace.onDidChangeConfiguration((event) => {
 		const cfg = workspace.getConfiguration('fstarVSCodeAssistant');

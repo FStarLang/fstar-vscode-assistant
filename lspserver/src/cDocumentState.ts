@@ -362,6 +362,15 @@ export class CDocumentState implements DocumentState {
 		await this.fstarDocumentState?.killAndRestartSolver();
 	}
 
+	async getTranslatedFst(position: Position): Promise<{ uri: string, position: Position } | undefined> {
+		await this.c2PulseDone;
+		const fstPos = this.c2fstPos(position);
+		if (this.c2PulseResult) {
+			await writeFile(this.fstPath, this.c2PulseResult.fstDocument.getText());
+		}
+		return { uri: this.fstUri, position: fstPos };
+	}
+
 	lastFstDiags?: PublishDiagnosticsParams;
 	lastStatus?: StatusNotificationParams;
 	fstarEventHandlers: DocumentStateEventHandlers = {

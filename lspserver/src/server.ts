@@ -11,7 +11,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { URI } from 'vscode-uri';
 import { defaultSettings, fstarVSCodeAssistantSettings } from './settings';
 import { FStar } from './fstar';
-import { statusNotification, killAndRestartSolverNotification, restartNotification, verifyToPositionNotification, killAllNotification } from './fstarLspExtensions';
+import { statusNotification, killAndRestartSolverNotification, restartNotification, verifyToPositionNotification, killAllNotification, getTranslatedFstRequest, GetTranslatedFstParams, GetTranslatedFstResponse } from './fstarLspExtensions';
 import { DocumentState, DocumentStateEventHandlers, FStarDocumentState } from './documentState';
 import { CDocumentState } from './cDocumentState';
 
@@ -106,6 +106,8 @@ export class Server {
 				state?.verifyToPosition(position);
 			}
 		});
+		this.connection.onRequest(getTranslatedFstRequest,
+			({uri, position}) => this.getDocumentState(uri)?.getTranslatedFst(position));
 		this.connection.onNotification(restartNotification, ({uri}) =>
 			void this.onRestartRequest(uri));
 		this.connection.onNotification(killAndRestartSolverNotification, ({uri}) =>

@@ -130,6 +130,11 @@
 				"command": "fstar-vscode-assistant/kill-all",
 				"title": "Kill all F* processes for all documents",
 				"category": "F*"
+			},
+			{
+				"command": "fstar-vscode-assistant/switch-to-translated-fst",
+				"title": "Switch to translated F* file",
+				"category": "F*"
 			}
 		],
 		"keybindings": [

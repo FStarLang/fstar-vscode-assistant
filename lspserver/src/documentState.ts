@@ -53,6 +53,7 @@ export interface DocumentState {
 	onHover(textDocumentPosition: TextDocumentPositionParams): Promise<Hover | undefined>;
 	onDefinition(defParams: DefinitionParams): Promise<LocationLink[] | undefined>;
 	onDocumentRangeFormatting(formatParams: DocumentRangeFormattingParams): Promise<TextEdit[]>;
+	getTranslatedFst(position: Position): Promise<{ uri: string, position: Position } | undefined>;
 	killAndRestartSolver(): Promise<void>;
 }
 
@@ -136,6 +137,8 @@ export class FStarDocumentState implements DocumentState {
 		this.fstar.validateFStarDocumentToPosition('lax-to-position', position);
 		this.fstar_lax?.validateFStarDocument('lax');
 	}
+
+	async getTranslatedFst(position: Position): Promise<undefined> {}
 
 	async onCompletion(textDocumentPosition: TextDocumentPositionParams): Promise<CompletionItem[] | undefined> {
 		return (this.fstar_lax ?? this.fstar).onCompletion(textDocumentPosition);

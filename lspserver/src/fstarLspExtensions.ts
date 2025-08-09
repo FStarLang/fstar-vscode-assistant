@@ -1,4 +1,4 @@
-import { ProtocolNotificationType, Position, Range } from 'vscode-languageserver-protocol';
+import { ProtocolNotificationType, Position, Range, ProtocolRequestType, RequestType } from 'vscode-languageserver-protocol';
 
 export type StatusKind
 	= 'ok'
@@ -44,5 +44,16 @@ export interface VerifyToPositionParams {
 }
 export const verifyToPositionNotification =
 	new ProtocolNotificationType<VerifyToPositionParams, RegistrationParams>('$/fstar/verifyToPosition');
+
+export interface GetTranslatedFstParams {
+	uri: string;
+	position: Position;
+}
+export interface GetTranslatedFstResponse {
+	uri: string;
+	position: Position;
+}
+export const getTranslatedFstRequest =
+	new RequestType<GetTranslatedFstParams, GetTranslatedFstResponse | undefined, undefined>('$/fstar/getTranslatedFst');
 
 interface RegistrationParams {}
