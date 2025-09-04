@@ -145,6 +145,19 @@ export class FStarDocumentState implements DocumentState {
 	}
 
 	async onHover(textDocumentPosition: TextDocumentPositionParams): Promise<Hover | undefined> {
+		// First, check if we have proof state information for this line
+		// This always needs to be routed to the full checking process.
+		const proofState = this.fstar.findIdeProofStateAtLine(textDocumentPosition.position);
+		if (proofState) {
+			return {
+				contents: {
+					kind: 'markdown',
+					value: formatIdeProofState(proofState)
+				}
+			};
+		}
+
+		// Otherwise, check the symbol information for this symbol
 		return (this.fstar_lax ?? this.fstar).onHover(textDocumentPosition);
 	}
 
@@ -584,17 +597,6 @@ export class DocumentProcess {
 	}
 
 	async onHover(textDocumentPosition: TextDocumentPositionParams): Promise<Hover | undefined> {
-		// First, check if we have proof state information for this line
-		const proofState = this.findIdeProofStateAtLine(textDocumentPosition.position);
-		if (proofState) {
-			return {
-				contents: {
-					kind: 'markdown',
-					value: formatIdeProofState(proofState)
-				}
-			};
-		}
-		// Otherwise, check the symbol information for this symbol
 		const word = findWordAtPosition(this.currentDoc, textDocumentPosition.position);
 		// The filename '<input>' here must be exactly the same the we used in the full buffer request.
 		const result = await this.fstar.lookupQuery('<input>', textDocumentPosition.position, word.word);
