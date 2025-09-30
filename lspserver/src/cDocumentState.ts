@@ -28,6 +28,10 @@ function cToSourceInfoPath(cPath: string): string {
 	return stripSuffix(cPath) + '_source_range_info.json';
 }
 
+function cToDiagnosticsPath(cPath: string): string {
+	return stripSuffix(cPath) + '_diagnostics.json';
+}
+
 interface SourceMapPos {
 	line: number; // starts with 1
 	column: number; // starts with 1
@@ -144,6 +148,11 @@ export class CDocumentState implements DocumentState {
 			const contents = await readFile(tmpFstPath, 'utf8');
 			const sourceRangeInfo = JSON.parse(await readFile(cToSourceInfoPath(tmpCPath), 'utf8'));
 
+			let diagnostics: Diagnostic[] = [];
+			try {
+				diagnostics = JSON.parse(await readFile(cToDiagnosticsPath(tmpCPath), 'utf8'));
+			} catch {}
+
 			const fstDocument = TextDocument.create(
 				this.fstUri,
 				'fstar',
@@ -154,6 +163,7 @@ export class CDocumentState implements DocumentState {
 			return {
 				fstDocument,
 				sourceRangeInfo,
+				errors: diagnostics,
 			};
 		} catch (e) {
 			const output = '' + e;
