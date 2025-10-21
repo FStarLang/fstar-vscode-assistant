@@ -235,7 +235,7 @@ export class FStarDocumentState implements DocumentState {
 }
 
 function isDummyRange(range: FStarRange): boolean {
-	return range.fname === 'dummy';
+	return range.fname === 'dummy' || range.beg[1] < 0;
 }
 
 interface FragmentResult {
@@ -546,7 +546,8 @@ export class DocumentProcess {
 		const defPos: Position = {line: 0, character: 0};
 		const defRange: Range = {start: defPos, end: defPos};
 
-		const ranges = [...diag.ranges];
+		const ranges = [...diag.ranges]
+			.filter(rng => !isDummyRange(rng));
 		let mainRange = defRange;
 
 		// Use the first range as the range of the diagnostic if it is in the current file,
@@ -561,7 +562,7 @@ export class DocumentProcess {
 			severity: ideErrorLevelAsDiagnosticSeverity(diag.level),
 			source: 'F*',
 			range: mainRange,
-			relatedInformation: await Promise.all(ranges.filter(rng => !isDummyRange(rng)).map(async rng => ({
+			relatedInformation: await Promise.all(ranges.map(async rng => ({
 				location: {
 					uri: await this.qualifyFilename(rng.fname, this.uri),
 					range: fstarRangeAsRange(rng),
