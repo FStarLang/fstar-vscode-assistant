@@ -7,6 +7,7 @@ import { setTimeout } from 'timers/promises';
 import { FStar, FStarConfig } from './fstar';
 import { isProtocolInfo, ProtocolInfo, FullBufferQuery, LookupQuery, VfsAdd, AutocompleteRequest,
 	IdeResponse, IdeResponseBase, IdeLookupResponse, IdeAutoCompleteOptions, FStarPosition} from './fstar_messages';
+import * as path from 'path';
 
 // For full-buffer queries, F* chunks the buffer into fragments and responds
 // with several messages, one for each fragment until the first failing
@@ -45,6 +46,14 @@ export class FStarConnection {
 		// F* error messages are just printed out
 		const fstar_proc_name = this.fstar.lax ? 'fstar lax' : 'fstar';
 		this.fstar.proc.stderr?.on('data', (data) => { console.error(`${fstar_proc_name} stderr: ${data}`); });
+	}
+
+	public mapInputFileHack(uri : string) {
+		return (this.fstar.fstarIdeVersion < 3 ? "<input>" : uri);
+	}
+
+	public fnameMatchesCurrentFile (fname:string, textdocUri: string) {
+		return ((this.fstar.fstarIdeVersion < 3 && fname === "<input>") || fname === path.basename(textdocUri));
 	}
 
 	// Attempts to spawn an F* process, using the given configuration and
@@ -333,5 +342,6 @@ export class FStarConnection {
 			this.fstar.supportsFullBuffer = false;
 			console.error("fstar.exe does not support full-buffer queries.");
 		}
+		this.fstar.fstarIdeVersion = pi.version;
 	}
 }

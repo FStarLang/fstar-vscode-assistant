@@ -18,24 +18,6 @@ interface WordAndRange {
 	word: string;
 	range: FStarRange;
 }
-// Find the word at the given position in the given document
-// (used to find the symbol under the cursor)
-function findWordAtPosition(doc: TextDocument, position: Position): WordAndRange {
-	const text = doc.getText();
-	const offset = doc.offsetAt(position);
-	let start = text.lastIndexOf(' ', offset) + 1;
-	const notIdentCharRegex = /[^a-zA-Z_.'0-9]/;
-	for (let i = offset; i >= start; i--) {
-		if (text.at(i)?.search(notIdentCharRegex) === 0) {
-			start = i + 1;
-			break;
-		}
-	}
-	const end = text.substring(offset).search(notIdentCharRegex);
-	const word = text.substring(start, end >= 0 ? end + offset : undefined);
-	const range = Range.create(doc.positionAt(start), doc.positionAt(start + word.length));
-	return { word: word, range: rangeAsFStarRange(range) };
-}
 
 export interface DocumentStateEventHandlers {
 	sendDiagnostics(params: PublishDiagnosticsParams): void;
@@ -376,6 +358,25 @@ export class DocumentProcess {
 		this.fstar.partialBufferRequest(this.currentDoc.getText(), kind, posAsFStarPos(position));
 	}
 
+	// Find the word at the given position in the given document
+	// (used to find the symbol under the cursor)
+	private findWordAtPosition(doc: TextDocument, position: Position): WordAndRange {
+		const text = doc.getText();
+		const offset = doc.offsetAt(position);
+		let start = text.lastIndexOf(' ', offset) + 1;
+		const notIdentCharRegex = /[^a-zA-Z_.'0-9]/;
+		for (let i = offset; i >= start; i--) {
+			if (text.at(i)?.search(notIdentCharRegex) === 0) {
+				start = i + 1;
+				break;
+			}
+		}
+		const end = text.substring(offset).search(notIdentCharRegex);
+		const word = text.substring(start, end >= 0 ? end + offset : undefined);
+		const range = Range.create(doc.positionAt(start), doc.positionAt(start + word.length));
+		return { word: word, range: rangeAsFStarRange(this.fstar.mapInputFileHack(doc.uri), range) };
+	}
+
 	private handleSingleFullBufferResponse(response: FullBufferQueryResponse, query: FullBufferQuery) {
 		if (response.kind === 'message' && response.level === 'progress') {
 			this.handleIdeProgress(response.contents, query);
@@ -406,7 +407,7 @@ export class DocumentProcess {
 	}
 
 	async qualifyFilename(fname: string, textdocUri: string): Promise<string> {
-		if (fname === '<input>') return textdocUri;
+		if (this.fstar.fnameMatchesCurrentFile(fname, textdocUri)) return textdocUri;
 
 		// if we have a relative path, then qualify it to the base of the
 		// F* process's cwd
@@ -553,7 +554,7 @@ export class DocumentProcess {
 		// Use the first range as the range of the diagnostic if it is in the current file,
 		// provide the rest as related info.
 		// Note: this seems to be wrong for pulse. https://github.com/FStarLang/pulse/issues/36
-		if (ranges.length > 0 && ranges[0].fname === '<input>') {
+		if (ranges.length > 0 && this.fstar.fnameMatchesCurrentFile(ranges[0].fname, this.uri)) {
 			mainRange = fstarRangeAsRange(ranges.shift()!);
 		}
 
@@ -578,7 +579,7 @@ export class DocumentProcess {
 	}
 
 	async onCompletion(textDocumentPosition: TextDocumentPositionParams): Promise<CompletionItem[] | undefined> {
-		const word = findWordAtPosition(this.currentDoc, textDocumentPosition.position);
+		const word = this.findWordAtPosition(this.currentDoc, textDocumentPosition.position);
 		if (word.word.length < 2) return;
 		const response = await this.fstar.autocompleteRequest(word.word);
 		if (response.status !== 'success') return;
@@ -598,9 +599,8 @@ export class DocumentProcess {
 	}
 
 	async onHover(textDocumentPosition: TextDocumentPositionParams): Promise<Hover | undefined> {
-		const word = findWordAtPosition(this.currentDoc, textDocumentPosition.position);
-		// The filename '<input>' here must be exactly the same the we used in the full buffer request.
-		const result = await this.fstar.lookupQuery('<input>', textDocumentPosition.position, word.word);
+		const word = this.findWordAtPosition(this.currentDoc, textDocumentPosition.position);
+		const result = await this.fstar.lookupQuery(this.fstar.mapInputFileHack(this.uri), textDocumentPosition.position, word.word);
 		if (result.status !== 'success') return;
 		switch (result.response.kind) {
 			case 'symbol': return {
@@ -626,9 +626,8 @@ export class DocumentProcess {
 	// It's very similar to the onHover handler, except that it returns a
 	// LocationLink object instead of a Hover object
 	async onDefinition(defParams: DefinitionParams): Promise<LocationLink[] | undefined> {
-		const word = findWordAtPosition(this.currentDoc, defParams.position);
-		// The filename '<input>' here must be exactly the same the we used in the full buffer request.
-		const result = await this.fstar.lookupQuery('<input>', defParams.position, word.word);
+		const word = this.findWordAtPosition(this.currentDoc, defParams.position);
+		const result = await this.fstar.lookupQuery(this.fstar.mapInputFileHack(this.uri), defParams.position, word.word);
 		if (result.status !== 'success') return [];
 		if (result.response.kind === 'symbol') {
 			const defined_at = result.response["defined-at"];

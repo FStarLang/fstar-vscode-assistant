@@ -26,9 +26,9 @@ export function posAsFStarPos(pos: Position): FStarPosition {
 	return [pos.line + 1, pos.character];
 }
 
-export function rangeAsFStarRange(rng: Range): FStarRange {
+export function rangeAsFStarRange(filename: string, rng: Range): FStarRange {
 	return {
-		fname: "<input>",
+		fname: filename,
 		beg: posAsFStarPos(rng.start),
 		end: posAsFStarPos(rng.end),
 	};
