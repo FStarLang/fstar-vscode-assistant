@@ -1,6 +1,7 @@
 import {
 	WorkspaceFolder,
 	Connection,
+	integer,
 } from 'vscode-languageserver/node';
 
 import {
@@ -29,6 +30,7 @@ export class FStar {
 			// Indicates whether the F* process supports full-buffer mode
 			public supportsFullBuffer: boolean,
 			public lax: boolean,
+			public fstarIdeVersion: integer = 3//default F* ide version is 3
 		) {
 		this.jsonlIface =
 			new JsonlInterface(
