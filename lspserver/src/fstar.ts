@@ -30,7 +30,7 @@ export class FStar {
 			// Indicates whether the F* process supports full-buffer mode
 			public supportsFullBuffer: boolean,
 			public lax: boolean,
-			public fstarIdeVersion: integer = 3//default F* ide version is 3
+			public fstarIdeVersion: number = 3, //default F* ide version is 3
 		) {
 		this.jsonlIface =
 			new JsonlInterface(
