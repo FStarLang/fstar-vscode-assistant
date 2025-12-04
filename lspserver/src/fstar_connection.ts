@@ -296,7 +296,7 @@ export class FStarConnection {
 
 		// We might get responses to other requests even when a full-buffer request is in progress,
 		// if those requests were issued before the full-buffer request.
-		if (this.fullBufferInProgress && qid === this.fullBufferInProgress.currentReq['query-id']) {
+		if (qid === this.fullBufferInProgress?.currentReq['query-id']) {
 			this.handleFBQResponse(r);
 		} else {
 			this.respond(qid, r);

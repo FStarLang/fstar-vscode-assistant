@@ -15,7 +15,7 @@
 		"multi-root ready"
 	],
 	"engines": {
-		"vscode": "^1.75.0"
+		"vscode": "^1.91.0"
 	},
 	"main": "./extension/out/extension",
 	"contributes": {
@@ -180,13 +180,12 @@
 		"test": "cd lspserver && npm test"
 	},
 	"devDependencies": {
-		"@eslint/js": "^9.12.0",
-		"@types/eslint__js": "^8.42.3",
-		"@types/node": "^16.18.113",
-		"@vscode/vsce": "^3.1.1",
-		"esbuild": "^0.24.0",
-		"eslint": "^9.12.0",
-		"typescript": "5.5.4",
-		"typescript-eslint": "^8.9.0"
+		"@eslint/js": "^9.39.1",
+		"@types/node": "^18.19.130",
+		"@vscode/vsce": "^3.7.1",
+		"esbuild": "^0.27.1",
+		"eslint": "^9.39.1",
+		"typescript": "5.9.3",
+		"typescript-eslint": "^8.48.1"
 	}
 }

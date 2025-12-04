@@ -57,18 +57,10 @@ export class FStar {
 			options.push("true");
 		}
 
-		if (config.options) {
-			config.options.forEach((opt) => { options.push(opt); });
-		}
-		if (config.include_dirs) {
-			config.include_dirs.forEach((dir) => { options.push("--include"); options.push(dir); });
-		}
-		if (!config.fstar_exe) {
-			config.fstar_exe = "fstar.exe";
-		}
-		if (!config.cwd) {
-			config.cwd = path.dirname(filePath);
-		}
+		config.options?.forEach(opt => options.push(opt));
+		config.include_dirs?.forEach(dir => options.push("--include", dir));
+		config.fstar_exe ??= "fstar.exe";
+		config.cwd ??= path.dirname(filePath);
 		if (debug) {
 			console.log("Spawning fstar with options: " + options);
 		}
@@ -134,7 +126,7 @@ export class FStar {
 					}
 					else {
 						connection.window.showErrorMessage(
-							`Failed to resolve environment variable ${a || b} for file ${filePath}`);
+							`Failed to resolve environment variable ${a ?? b} for file ${filePath}`);
 						return "";
 					}
 				});

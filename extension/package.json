@@ -17,11 +17,11 @@
 	},
 	"dependencies": {
 		"html-escaper": "^3.0.3",
-		"vscode-languageclient": "^9.0.1"
+		"vscode-languageclient": "^10.0.0-next.18"
 	},
 	"devDependencies": {
-		"@types/html-escaper": "^3.0.2",
-		"@types/vscode": "^1.86.0",
+		"@types/html-escaper": "^3.0.4",
+		"@types/vscode": "^1.91.0",
 		"@vscode/test-electron": "^2.4.1"
 	}
 }
