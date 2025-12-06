@@ -53,7 +53,7 @@ export class FStarConnection {
 	}
 
 	public fnameMatchesCurrentFile (fname:string, textdocUri: string) {
-		return ((this.fstar.fstarIdeVersion < 3 && fname === "<input>") || fname === path.basename(textdocUri));
+		return ((this.fstar.fstarIdeVersion < 3 && fname === "<input>") || path.basename(fname) === path.basename(textdocUri));
 	}
 
 	// Attempts to spawn an F* process, using the given configuration and
