@@ -93,6 +93,18 @@ export class FStar {
 		return new FStar(proc, config, supportsFullBuffer, !!lax);
 	}
 
+	// Resolves the fstar_exe path from a config, applying the same logic as trySpawnFstar.
+	static resolveFStarExe(config: FStarConfig): string {
+		config.fstar_exe ??= "fstar.exe";
+		config.cwd ??= ".";
+		let fstar_exe_resolved = config.fstar_exe;
+		if (fstar_exe_resolved.includes(path.sep)) {
+			fstar_exe_resolved = path.resolve(config.cwd, fstar_exe_resolved);
+		}
+		fstar_exe_resolved = which.sync(fstar_exe_resolved);
+		return fstar_exe_resolved;
+	}
+
 	// Dynamically loads the FStarConfiguration for a given file `textDocument`
 	// before attempting to launch an instance of F*.
 	static async fromInferredConfig(filePath: string, workspaceFolders: WorkspaceFolder[], connection: Connection,

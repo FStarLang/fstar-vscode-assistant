@@ -56,4 +56,13 @@ export interface GetTranslatedFstResponse {
 export const getTranslatedFstRequest =
 	new RequestType<GetTranslatedFstParams, GetTranslatedFstResponse | undefined, undefined>('$/fstar/getTranslatedFst');
 
+export interface GetFStarExeParams {
+	uri: string;
+}
+export interface GetFStarExeResponse {
+	fstar_exe: string;
+}
+export const getFStarExeRequest =
+	new RequestType<GetFStarExeParams, GetFStarExeResponse, undefined>('$/fstar/getFStarExe');
+
 interface RegistrationParams {}
