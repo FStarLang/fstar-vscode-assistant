@@ -28,6 +28,7 @@ export interface DocumentState {
 	dispose(): void;
 	setDebug(debug: boolean): void;
 	changeDoc(newDoc: TextDocument): void;
+	onSave?(): void;
 	verifyAll(params?: {flycheckOnly?: boolean}): void;
 	verifyToPosition(position: Position): void;
 	laxToPosition(position: Position): void;

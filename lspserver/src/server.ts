@@ -13,7 +13,12 @@ import { defaultSettings, fstarVSCodeAssistantSettings } from './settings';
 import { FStar } from './fstar';
 import { statusNotification, killAndRestartSolverNotification, restartNotification, verifyToPositionNotification, killAllNotification, getTranslatedFstRequest, GetTranslatedFstParams, GetTranslatedFstResponse } from './fstarLspExtensions';
 import { DocumentState, DocumentStateEventHandlers, FStarDocumentState } from './documentState';
-import { CDocumentState } from './cDocumentState';
+import { PalProjectState } from './palProjectState';
+import { PalCDocumentState } from './palCDocumentState';
+import { PalFstDocumentState } from './palFstDocumentState';
+import * as path from 'path';
+import { getEnclosingDirectories } from './utils';
+import * as fs from 'fs';
 
 // LSP Server
 //
@@ -25,6 +30,8 @@ import { CDocumentState } from './cDocumentState';
 // easier testing.
 export class Server {
 	documentStates = new Map<string, DocumentState>();
+	// PAL project states, keyed by project directory
+	palProjectStates = new Map<string, PalProjectState>();
 	// Text document manager.
 	documents: TextDocuments<TextDocument>;
 	// All the open workspace folders
@@ -66,8 +73,8 @@ export class Server {
 
 		this.documents.onDidSave(change => {
 			const docState = this.getDocumentState(change.document.uri);
+			docState?.onSave?.();
 			if (this.configurationSettings.verifyOnSave) {
-				// TODO: sequence with c2pulse
 				docState?.verifyAll();
 			}
 		});
@@ -154,13 +161,77 @@ export class Server {
 			this.workspaceFolders, this.connection, this.configurationSettings);
 
 		if (filePath.endsWith('.c') || filePath.endsWith('.h')) {
-			const docState = new CDocumentState(doc, fstar_config, this.eventHandlers, this.configurationSettings);
-			if (docState) this.documentStates.set(uri, docState);
+			// Check if this is a PAL project
+			const projectState = await this.getOrCreatePalProjectState(filePath, fstar_config);
+			if (projectState) {
+				const docState = new PalCDocumentState(doc, projectState, this.eventHandlers);
+				this.documentStates.set(uri, docState);
+			} else {
+				// No PAL project found — create a regular F* document state
+				const docState = FStarDocumentState.make(doc, fstar_config, this.eventHandlers,
+					this.configurationSettings);
+				if (docState) this.documentStates.set(uri, docState);
+			}
+		} else if (filePath.endsWith('.fst') || filePath.endsWith('.fsti')) {
+			// Check if this .fst file belongs to a PAL output directory
+			const projectState = this.findPalProjectForFst(filePath);
+			if (projectState) {
+				const docState = new PalFstDocumentState(doc, projectState, this.eventHandlers);
+				this.documentStates.set(uri, docState);
+			} else {
+				const docState = FStarDocumentState.make(doc, fstar_config, this.eventHandlers,
+					this.configurationSettings);
+				if (docState) this.documentStates.set(uri, docState);
+			}
 		} else {
 			const docState = FStarDocumentState.make(doc, fstar_config, this.eventHandlers,
 				this.configurationSettings);
 			if (docState) this.documentStates.set(uri, docState);
 		}
+	}
+
+	/** Find or create a PalProjectState for a C/H file */
+	private async getOrCreatePalProjectState(filePath: string, fstarConfig: any): Promise<PalProjectState | undefined> {
+		const dirs = getEnclosingDirectories(filePath);
+		for (const dir of dirs) {
+			// Check cache first
+			if (this.palProjectStates.has(dir)) {
+				return this.palProjectStates.get(dir);
+			}
+
+			// Check if pal.config.json exists in this directory
+			const configPath = path.join(dir, 'pal.config.json');
+			try {
+				await fs.promises.access(configPath);
+			} catch {
+				continue;
+			}
+
+			// Found it — create a project state
+			const fstarConfigForProject = await FStar.getFStarConfig(
+				path.join(dir, 'dummy.fst'),
+				this.workspaceFolders, this.connection, this.configurationSettings);
+
+			const projectState = await PalProjectState.tryLoad(dir, fstarConfigForProject, this.eventHandlers, this.configurationSettings);
+			if (projectState) {
+				this.palProjectStates.set(dir, projectState);
+				return projectState;
+			}
+		}
+		return undefined;
+	}
+
+	/** Find an existing PalProjectState whose output directory contains the given .fst file */
+	private findPalProjectForFst(filePath: string): PalProjectState | undefined {
+		for (const projectState of this.palProjectStates.values()) {
+			if (projectState.isInOutputDir(filePath)) {
+				return projectState;
+			}
+		}
+		// Also check if the .fst file is in a directory that is the output of a pal project
+		// we haven't loaded yet (e.g., user opened .fst before .c)
+		// For now, we only match against already-loaded projects
+		return undefined;
 	}
 
 	// Initialization of the LSP server: Called once when the workspace is opened
@@ -256,5 +327,9 @@ export class Server {
 		for (const v of oldDocStates) {
 			v.dispose();
 		}
+		for (const ps of this.palProjectStates.values()) {
+			ps.dispose();
+		}
+		this.palProjectStates = new Map();
 	}
 }
