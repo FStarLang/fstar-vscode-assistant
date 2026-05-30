@@ -11,7 +11,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { URI } from 'vscode-uri';
 import { defaultSettings, fstarVSCodeAssistantSettings } from './settings';
 import { FStar } from './fstar';
-import { statusNotification, killAndRestartSolverNotification, restartNotification, verifyToPositionNotification, killAllNotification, getTranslatedFstRequest, GetTranslatedFstParams, GetTranslatedFstResponse } from './fstarLspExtensions';
+import { statusNotification, killAndRestartSolverNotification, restartNotification, verifyToPositionNotification, killAllNotification, getTranslatedFstRequest, GetTranslatedFstParams, GetTranslatedFstResponse, getFStarExeRequest } from './fstarLspExtensions';
 import { DocumentState, DocumentStateEventHandlers, FStarDocumentState } from './documentState';
 import { PalProjectState } from './palProjectState';
 import { PalCDocumentState } from './palCDocumentState';
@@ -121,6 +121,12 @@ export class Server {
 			void this.getDocumentState(uri)?.killAndRestartSolver());
 		this.connection.onNotification(killAllNotification, () =>
 			this.onKillAllRequest());
+		this.connection.onRequest(getFStarExeRequest, async ({uri}) => {
+			const filePath = URI.parse(uri).fsPath;
+			const config = await FStar.getFStarConfig(filePath,
+				this.workspaceFolders, this.connection, this.configurationSettings);
+			return { fstar_exe: FStar.resolveFStarExe(config) };
+		});
 	}
 
 	run() {

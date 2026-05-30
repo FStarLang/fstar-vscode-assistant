@@ -7,6 +7,8 @@ import { CancellationToken, Command, CustomDocument, CustomDocumentOpenContext, 
 import * as cp from 'child_process';
 import * as util from 'util';
 import { escape } from 'html-escaper';
+import { LanguageClient } from 'vscode-languageclient/node';
+import { getFStarExeRequest } from './fstarLspExtensions';
 
 class CommandOutputDocument implements CustomDocument {
 	constructor(public uri: Uri, public cmd: string, public stdout: string, public stderr: string) {}
@@ -36,8 +38,9 @@ ${escape(this.stdout)}
 }
 
 abstract class CommandOutputProvider implements CustomReadonlyEditorProvider<CommandOutputDocument> {
+	constructor(protected client: LanguageClient) {}
 	async openCustomDocument(uri: Uri): Promise<CommandOutputDocument> {
-		const cmd = this.getCommand(uri);
+		const cmd = await this.getCommand(uri);
 		const out = await util.promisify(cp.execFile)(cmd[0], cmd.slice(1), {
 			maxBuffer: 50*1024*1024, // allow up to 50 megabytes of output
 		});
@@ -46,12 +49,25 @@ abstract class CommandOutputProvider implements CustomReadonlyEditorProvider<Com
 	resolveCustomEditor(document: CommandOutputDocument, webviewPanel: WebviewPanel) {
 		webviewPanel.webview.html = document.toHtml();
 	}
-	abstract getCommand(uri: Uri): string[];
+	abstract getCommand(uri: Uri): Promise<string[]>;
+
+	protected async getFStarExe(uri: Uri): Promise<string> {
+		try {
+			const response = await this.client.sendRequest(getFStarExeRequest, { uri: uri.toString() });
+			return response.fstar_exe;
+		} catch {
+			return 'fstar.exe';
+		}
+	}
 }
 
 export class CheckedFileEditorProvider extends CommandOutputProvider {
-	getCommand(uri: Uri): string[] { return ['fstar.exe', '--read_checked_file', uri.fsPath]; }
+	async getCommand(uri: Uri): Promise<string[]> {
+		return [await this.getFStarExe(uri), '--read_checked_file', uri.fsPath];
+	}
 }
 export class KrmlFileEditorProvider extends CommandOutputProvider {
-	getCommand(uri: Uri): string[] { return ['fstar.exe', '--read_krml_file', uri.fsPath]; }
+	async getCommand(uri: Uri): Promise<string[]> {
+		return [await this.getFStarExe(uri), '--read_krml_file', uri.fsPath];
+	}
 }

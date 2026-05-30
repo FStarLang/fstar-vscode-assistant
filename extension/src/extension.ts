@@ -219,8 +219,8 @@ export async function activate(context: ExtensionContext) {
 		};
 	});
 
-	context.subscriptions.push(vscode.window.registerCustomEditorProvider('fstar.checked', new CheckedFileEditorProvider()));
-	context.subscriptions.push(vscode.window.registerCustomEditorProvider('fstar.krml', new KrmlFileEditorProvider()));
+	context.subscriptions.push(vscode.window.registerCustomEditorProvider('fstar.checked', new CheckedFileEditorProvider(client)));
+	context.subscriptions.push(vscode.window.registerCustomEditorProvider('fstar.krml', new KrmlFileEditorProvider(client)));
 
 	await client.start();
 }
