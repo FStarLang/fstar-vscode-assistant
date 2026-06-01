@@ -3,7 +3,7 @@ import * as cp from 'child_process';
 import * as util from 'util';
 import { readFile, readdir } from 'fs/promises';
 import { TextDocument } from 'vscode-languageserver-textdocument';
-import { Diagnostic } from 'vscode-languageserver';
+import { Diagnostic, Position, Range } from 'vscode-languageserver';
 import { URI } from 'vscode-uri';
 import { FStarConfig } from './fstar';
 import { FStarDocumentState, DocumentStateEventHandlers } from './documentState';
@@ -17,26 +17,16 @@ export interface PalConfig {
 	files?: string; // glob pattern like "*.c"
 }
 
-// New source_range_info.json format (0-based positions)
-export interface PalSourcePos {
-	line: number;
-	character: number;
-}
-
-export interface PalSourceRange {
-	start: PalSourcePos;
-	end: PalSourcePos;
-}
-
+// source_range_info.json types (positions are LSP-compatible: 0-based line/character)
 export interface PalMapping {
-	source: PalSourcePos;
-	pulse: PalSourcePos;
+	source: Position;
+	pulse: Position;
 }
 
 export interface PalModuleInfo {
 	fstFile: string;
 	declName: string;
-	sourceRange: PalSourceRange;
+	sourceRange: Range;
 	mappings: PalMapping[];
 }
 

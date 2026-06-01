@@ -2,19 +2,11 @@ import { Position, Range, TextDocument } from 'vscode-languageserver-textdocumen
 import { DocumentState, DocumentStateEventHandlers } from './documentState';
 import { TextDocumentPositionParams, CompletionItem, Hover, DefinitionParams, LocationLink, DocumentRangeFormattingParams, TextEdit, Diagnostic } from 'vscode-languageserver';
 import { URI } from 'vscode-uri';
-import { PalProjectState, PalModuleInfo, PalMapping, PalSourcePos, PalDiagnosticsListener, PalStatusListener } from './palProjectState';
+import { PalProjectState, PalModuleInfo, PalMapping, PalDiagnosticsListener, PalStatusListener } from './palProjectState';
 import { FragmentStatus } from './fstarLspExtensions';
 import * as path from 'path';
 
-function palPosToLspPos(p: PalSourcePos): Position {
-	return { line: p.line, character: p.character };
-}
-
-function lspPosToPalPos(p: Position): PalSourcePos {
-	return { line: p.line, character: p.character };
-}
-
-function palPosLe(a: PalSourcePos, b: PalSourcePos): boolean {
+function posLe(a: Position, b: Position): boolean {
 	return a.line < b.line || (a.line === b.line && a.character <= b.character);
 }
 
@@ -203,12 +195,11 @@ export class PalCDocumentState implements DocumentState {
 
 	private c2fst(pos: Position): { fstFile: string; position: Position } | undefined {
 		const modules = this.projectState.getModulesForCFile(this.cUri);
-		const palPos = lspPosToPalPos(pos);
 
 		// Find the module whose sourceRange contains this position
 		let bestModule: PalModuleInfo | undefined;
 		for (const mod of modules) {
-			if (palPosLe(mod.sourceRange.start, palPos) && palPosLe(palPos, mod.sourceRange.end)) {
+			if (posLe(mod.sourceRange.start, pos) && posLe(pos, mod.sourceRange.end)) {
 				bestModule = mod;
 				break;
 			}
@@ -217,7 +208,7 @@ export class PalCDocumentState implements DocumentState {
 		if (!bestModule) {
 			// Find the closest module whose range starts before this position
 			for (const mod of modules) {
-				if (palPosLe(mod.sourceRange.start, palPos)) {
+				if (posLe(mod.sourceRange.start, pos)) {
 					bestModule = mod;
 				}
 			}
@@ -228,15 +219,14 @@ export class PalCDocumentState implements DocumentState {
 			else return undefined;
 		}
 
-		const fstPos = this.mapCToPulse(palPos, bestModule.mappings);
-		return { fstFile: bestModule.fstFile, position: palPosToLspPos(fstPos) };
+		return { fstFile: bestModule.fstFile, position: this.mapCToPulse(pos, bestModule.mappings) };
 	}
 
-	private mapCToPulse(pos: PalSourcePos, mappings: PalMapping[]): PalSourcePos {
+	private mapCToPulse(pos: Position, mappings: PalMapping[]): Position {
 		let best: PalMapping | undefined;
 		for (const m of mappings) {
-			if (palPosLe(m.source, pos)) {
-				if (!best || palPosLe(best.source, m.source)) {
+			if (posLe(m.source, pos)) {
+				if (!best || posLe(best.source, m.source)) {
 					best = m;
 				}
 			}
@@ -249,16 +239,16 @@ export class PalCDocumentState implements DocumentState {
 		const mod = modules.find(m => m.fstFile === fstFile);
 		if (!mod) return range;
 
-		const startPos = this.mapPulseToC(lspPosToPalPos(range.start), mod.mappings);
-		const endPos = this.mapPulseToC(lspPosToPalPos(range.end), mod.mappings);
-		return { start: palPosToLspPos(startPos), end: palPosToLspPos(endPos) };
+		const startPos = this.mapPulseToC(range.start, mod.mappings);
+		const endPos = this.mapPulseToC(range.end, mod.mappings);
+		return { start: startPos, end: endPos };
 	}
 
-	private mapPulseToC(pos: PalSourcePos, mappings: PalMapping[]): PalSourcePos {
+	private mapPulseToC(pos: Position, mappings: PalMapping[]): Position {
 		let best: PalMapping | undefined;
 		for (const m of mappings) {
-			if (palPosLe(m.pulse, pos)) {
-				if (!best || palPosLe(best.pulse, m.pulse)) {
+			if (posLe(m.pulse, pos)) {
+				if (!best || posLe(best.pulse, m.pulse)) {
 					best = m;
 				}
 			}
