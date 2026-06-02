@@ -262,8 +262,11 @@ export class PalProjectState {
 			}
 		}
 
-		// For each .fst file, create or update FStarDocumentState
+		// For already-running states, update document content
 		for (const fstFile of allFstFiles) {
+			const existingState = this.fstStates.get(fstFile);
+			if (!existingState) continue;
+
 			const fstPath = path.join(this.outDir, fstFile);
 			const fstUri = URI.from({ scheme: 'file', path: fstPath }).toString();
 
@@ -271,23 +274,11 @@ export class PalProjectState {
 			try {
 				contents = await readFile(fstPath, 'utf8');
 			} catch {
-				continue; // File doesn't exist yet
+				continue;
 			}
 
-			const existingState = this.fstStates.get(fstFile);
-			if (existingState) {
-				// Update the document content
-				const newDoc = TextDocument.create(fstUri, 'fstar', Date.now(), contents);
-				existingState.changeDoc(newDoc);
-			} else {
-				// Create new FStarDocumentState
-				const doc = TextDocument.create(fstUri, 'fstar', Date.now(), contents);
-
-				const state = FStarDocumentState.make(doc, this.fstarConfig, this.makeFstEventHandlers(fstFile), this.config);
-				if (state) {
-					this.fstStates.set(fstFile, state);
-				}
-			}
+			const newDoc = TextDocument.create(fstUri, 'fstar', Date.now(), contents);
+			existingState.changeDoc(newDoc);
 		}
 
 		// Dispose states for .fst files no longer in source range info
@@ -297,6 +288,29 @@ export class PalProjectState {
 				this.fstStates.delete(fstFile);
 			}
 		}
+	}
+
+	/** Get or lazily create the FStarDocumentState for a .fst file */
+	async getOrCreateFstState(fstBasename: string): Promise<FStarDocumentState | undefined> {
+		const existing = this.fstStates.get(fstBasename);
+		if (existing) return existing;
+
+		const fstPath = path.join(this.outDir, fstBasename);
+		const fstUri = URI.from({ scheme: 'file', path: fstPath }).toString();
+
+		let contents: string;
+		try {
+			contents = await readFile(fstPath, 'utf8');
+		} catch {
+			return undefined;
+		}
+
+		const doc = TextDocument.create(fstUri, 'fstar', Date.now(), contents);
+		const state = FStarDocumentState.make(doc, this.fstarConfig, this.makeFstEventHandlers(fstBasename), this.config);
+		if (state) {
+			this.fstStates.set(fstBasename, state);
+		}
+		return state ?? undefined;
 	}
 
 	private makeFstEventHandlers(fstFile: string): DocumentStateEventHandlers {

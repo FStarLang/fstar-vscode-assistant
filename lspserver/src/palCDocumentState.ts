@@ -104,28 +104,32 @@ export class PalCDocumentState implements DocumentState {
 	}
 
 	verifyAll(params?: { flycheckOnly?: boolean }): void {
-		void this.projectState.palDone.then(() => {
+		void this.projectState.palDone.then(async () => {
 			const fstFiles = this.projectState.getFstFilesForCFile(this.cUri);
 			for (const fstFile of fstFiles) {
-				this.projectState.getFstState(fstFile)?.verifyAll(params);
+				const state = await this.projectState.getOrCreateFstState(fstFile);
+				state?.verifyAll(params);
 			}
 		});
 	}
 
 	verifyToPosition(position: Position): void {
-		void this.projectState.palDone.then(() => {
+		void this.projectState.palDone.then(async () => {
 			const mapped = this.c2fst(position);
 			if (mapped) {
-				this.projectState.getFstState(mapped.fstFile)?.verifyToPosition(mapped.position);
+				// Verify the entire F* file corresponding to this position
+				const state = await this.projectState.getOrCreateFstState(mapped.fstFile);
+				state?.verifyAll();
 			}
 		});
 	}
 
 	laxToPosition(position: Position): void {
-		void this.projectState.palDone.then(() => {
+		void this.projectState.palDone.then(async () => {
 			const mapped = this.c2fst(position);
 			if (mapped) {
-				this.projectState.getFstState(mapped.fstFile)?.laxToPosition(mapped.position);
+				const state = await this.projectState.getOrCreateFstState(mapped.fstFile);
+				state?.laxToPosition(mapped.position);
 			}
 		});
 	}
@@ -280,19 +284,47 @@ export class PalCDocumentState implements DocumentState {
 	}
 
 	private sendAggregatedStatus() {
-		const fstFiles = this.projectState.getFstFilesForCFile(this.cUri);
+		const modules = this.projectState.getModulesForCFile(this.cUri);
 		const allFragments: FragmentStatus[] = [];
 
-		for (const fstFile of fstFiles) {
-			const fragments = this.fstStatusFragments.get(fstFile) ?? [];
-			for (const frag of fragments) {
-				allFragments.push({
-					...frag,
-					range: this.fst2cRange(fstFile, frag.range),
-				});
+		for (const mod of modules) {
+			const fragments = this.fstStatusFragments.get(mod.fstFile) ?? [];
+			// Summarize the F* file's status into one fragment for the module's sourceRange
+			const kind = this.summarizeStatus(fragments);
+			if (kind) {
+				allFragments.push({ kind, range: mod.sourceRange });
 			}
 		}
 
 		this.cEvents.sendStatus({ uri: this.cUri, fragments: allFragments });
+	}
+
+	/** Summarize multiple F* status fragments into one overall status kind */
+	private summarizeStatus(fragments: FragmentStatus[]): FragmentStatus['kind'] | undefined {
+		if (fragments.length === 0) return undefined;
+
+		let hasInProgress = false;
+		let hasStarted = false;
+		let hasFailed = false;
+		let hasOk = false;
+		let hasLaxOk = false;
+
+		for (const frag of fragments) {
+			switch (frag.kind) {
+				case 'in-progress': hasInProgress = true; break;
+				case 'started': hasStarted = true; break;
+				case 'failed':
+				case 'light-failed': hasFailed = true; break;
+				case 'ok': hasOk = true; break;
+				case 'lax-ok':
+				case 'light-ok': hasLaxOk = true; break;
+			}
+		}
+
+		if (hasFailed) return 'failed';
+		if (hasInProgress || hasStarted) return 'in-progress';
+		if (hasOk && !hasLaxOk) return 'ok';
+		if (hasLaxOk) return 'lax-ok';
+		return undefined;
 	}
 }

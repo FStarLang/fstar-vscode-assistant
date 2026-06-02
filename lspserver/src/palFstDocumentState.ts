@@ -47,11 +47,11 @@ export class PalFstDocumentState implements DocumentState {
 	}
 
 	verifyAll(params?: { flycheckOnly?: boolean }): void {
-		this.fstarState?.verifyAll(params);
+		void this.projectState.getOrCreateFstState(this.fstBasename).then(s => s?.verifyAll(params));
 	}
 
 	verifyToPosition(position: Position): void {
-		this.fstarState?.verifyToPosition(position);
+		void this.projectState.getOrCreateFstState(this.fstBasename).then(s => s?.verifyToPosition(position));
 	}
 
 	laxToPosition(position: Position): void {
