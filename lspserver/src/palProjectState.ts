@@ -283,31 +283,7 @@ export class PalProjectState {
 				// Create new FStarDocumentState
 				const doc = TextDocument.create(fstUri, 'fstar', Date.now(), contents);
 
-				const eventHandlers: DocumentStateEventHandlers = {
-					sendDiagnostics: (params) => {
-						// Forward to the fst tab if open
-						const fstHandlers = this.fstEventHandlers.get(fstFile);
-						if (fstHandlers) {
-							fstHandlers.sendDiagnostics(params);
-						}
-						// Notify diagnostics listeners (C document states)
-						for (const listener of this.diagnosticsListeners) {
-							listener(fstFile, params.diagnostics);
-						}
-					},
-					sendStatus: (params) => {
-						const fstHandlers = this.fstEventHandlers.get(fstFile);
-						if (fstHandlers) {
-							fstHandlers.sendStatus(params);
-						}
-						// Notify status listeners
-						for (const listener of this.statusListeners) {
-							listener(fstFile, params.fragments);
-						}
-					},
-				};
-
-				const state = FStarDocumentState.make(doc, this.fstarConfig, eventHandlers, this.config);
+				const state = FStarDocumentState.make(doc, this.fstarConfig, this.makeFstEventHandlers(fstFile), this.config);
 				if (state) {
 					this.fstStates.set(fstFile, state);
 				}
@@ -320,6 +296,54 @@ export class PalProjectState {
 				state.dispose();
 				this.fstStates.delete(fstFile);
 			}
+		}
+	}
+
+	private makeFstEventHandlers(fstFile: string): DocumentStateEventHandlers {
+		return {
+			sendDiagnostics: (params) => {
+				const fstHandlers = this.fstEventHandlers.get(fstFile);
+				if (fstHandlers) {
+					fstHandlers.sendDiagnostics(params);
+				}
+				for (const listener of this.diagnosticsListeners) {
+					listener(fstFile, params.diagnostics);
+				}
+			},
+			sendStatus: (params) => {
+				const fstHandlers = this.fstEventHandlers.get(fstFile);
+				if (fstHandlers) {
+					fstHandlers.sendStatus(params);
+				}
+				for (const listener of this.statusListeners) {
+					listener(fstFile, params.fragments);
+				}
+			},
+		};
+	}
+
+	/** Restart the FStarDocumentState for a specific .fst file (dispose and recreate) */
+	async restartFstState(fstBasename: string): Promise<void> {
+		const existing = this.fstStates.get(fstBasename);
+		if (existing) {
+			existing.dispose();
+			this.fstStates.delete(fstBasename);
+		}
+
+		const fstPath = path.join(this.outDir, fstBasename);
+		const fstUri = URI.from({ scheme: 'file', path: fstPath }).toString();
+
+		let contents: string;
+		try {
+			contents = await readFile(fstPath, 'utf8');
+		} catch {
+			return;
+		}
+
+		const doc = TextDocument.create(fstUri, 'fstar', Date.now(), contents);
+		const state = FStarDocumentState.make(doc, this.fstarConfig, this.makeFstEventHandlers(fstBasename), this.config);
+		if (state) {
+			this.fstStates.set(fstBasename, state);
 		}
 	}
 

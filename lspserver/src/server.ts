@@ -315,6 +315,15 @@ export class Server {
 
 	private async onRestartRequest(uri: string) {
 		if (!this.documents.get(uri)) return;
+
+		// For PAL .fst files, restart the underlying F* state in the project
+		const filePath = URI.parse(uri).fsPath;
+		const projectState = this.findPalProjectForFst(filePath);
+		if (projectState) {
+			const fstBasename = path.basename(filePath);
+			await projectState.restartFstState(fstBasename);
+		}
+
 		this.documentStates.get(uri)?.dispose();
 		this.documentStates.delete(uri);
 		await this.refreshDocumentState(uri);
