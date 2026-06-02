@@ -14,7 +14,7 @@ import { AsyncRateLimiter } from './asyncSignals';
 export interface PalConfig {
 	pal_exe?: string;
 	options?: string[];
-	files?: string; // glob pattern like "*.c"
+	files?: string | string[]; // glob pattern(s) like "*.c" or ["src/*.c", "lib/*.c"]
 }
 
 // source_range_info.json types (positions are LSP-compatible: 0-based line/character)
@@ -192,10 +192,11 @@ export class PalProjectState {
 
 	private async runPalCore() {
 		try {
-			// Expand file glob
-			const filesPattern = this.palConfig.files ?? '*.c';
+			// Expand file glob(s)
+			const filesPatterns = this.palConfig.files ?? '*.c';
+			const patterns = Array.isArray(filesPatterns) ? filesPatterns : [filesPatterns];
 			const allFiles = await readdir(this.projectDir);
-			const cFiles = this.expandGlob(allFiles, filesPattern);
+			const cFiles = this.expandGlobs(allFiles, patterns);
 
 			if (cFiles.length === 0) return;
 
@@ -318,14 +319,23 @@ export class PalProjectState {
 		}
 	}
 
-	/** Expand a simple glob pattern (only supports *.ext) against a list of filenames */
-	private expandGlob(files: string[], pattern: string): string[] {
-		if (pattern.startsWith('*')) {
-			const ext = pattern.slice(1); // e.g., ".c"
-			return files.filter(f => f.endsWith(ext));
+	/** Expand glob patterns (supports *.ext) against a list of filenames, deduplicating */
+	private expandGlobs(files: string[], patterns: string[]): string[] {
+		const result = new Set<string>();
+		for (const pattern of patterns) {
+			if (pattern.startsWith('*')) {
+				const ext = pattern.slice(1); // e.g., ".c"
+				for (const f of files) {
+					if (f.endsWith(ext)) result.add(f);
+				}
+			} else {
+				// Treat as literal filename
+				for (const f of files) {
+					if (f === pattern) result.add(f);
+				}
+			}
 		}
-		// Fallback: treat as literal
-		return files.filter(f => f === pattern);
+		return [...result];
 	}
 
 	/** Check if a file path is inside this project's output directory */
