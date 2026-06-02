@@ -1,7 +1,7 @@
 import * as path from 'path';
 import * as cp from 'child_process';
 import * as util from 'util';
-import { readFile, readdir } from 'fs/promises';
+import { readFile, glob } from 'fs/promises';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Diagnostic, Position, Range } from 'vscode-languageserver';
 import { URI } from 'vscode-uri';
@@ -195,8 +195,12 @@ export class PalProjectState {
 			// Expand file glob(s)
 			const filesPatterns = this.palConfig.files ?? '*.c';
 			const patterns = Array.isArray(filesPatterns) ? filesPatterns : [filesPatterns];
-			const allFiles = await readdir(this.projectDir);
-			const cFiles = this.expandGlobs(allFiles, patterns);
+			const cFiles: string[] = [];
+			for (const pattern of patterns) {
+				for await (const match of glob(pattern, { cwd: this.projectDir })) {
+					cFiles.push(match);
+				}
+			}
 
 			if (cFiles.length === 0) return;
 
@@ -317,25 +321,6 @@ export class PalProjectState {
 				this.fstStates.delete(fstFile);
 			}
 		}
-	}
-
-	/** Expand glob patterns (supports *.ext) against a list of filenames, deduplicating */
-	private expandGlobs(files: string[], patterns: string[]): string[] {
-		const result = new Set<string>();
-		for (const pattern of patterns) {
-			if (pattern.startsWith('*')) {
-				const ext = pattern.slice(1); // e.g., ".c"
-				for (const f of files) {
-					if (f.endsWith(ext)) result.add(f);
-				}
-			} else {
-				// Treat as literal filename
-				for (const f of files) {
-					if (f === pattern) result.add(f);
-				}
-			}
-		}
-		return [...result];
 	}
 
 	/** Check if a file path is inside this project's output directory */
