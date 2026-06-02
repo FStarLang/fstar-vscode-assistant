@@ -172,11 +172,6 @@ export class Server {
 			if (projectState) {
 				const docState = new PalCDocumentState(doc, projectState, this.eventHandlers);
 				this.documentStates.set(uri, docState);
-			} else {
-				// No PAL project found — create a regular F* document state
-				const docState = FStarDocumentState.make(doc, fstar_config, this.eventHandlers,
-					this.configurationSettings);
-				if (docState) this.documentStates.set(uri, docState);
 			}
 		} else if (filePath.endsWith('.fst') || filePath.endsWith('.fsti')) {
 			// Check if this .fst file belongs to a PAL output directory
