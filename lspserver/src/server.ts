@@ -316,18 +316,29 @@ export class Server {
 	private async onRestartRequest(uri: string) {
 		if (!this.documents.get(uri)) return;
 
-		// For PAL .fst files, restart the underlying F* state in the project
 		const filePath = URI.parse(uri).fsPath;
-		const projectState = this.findPalProjectForFst(filePath);
-		if (projectState) {
+
+		// For PAL .fst files, restart the underlying F* state
+		const fstProjectState = this.findPalProjectForFst(filePath);
+		if (fstProjectState) {
 			const fstBasename = path.basename(filePath);
-			await projectState.restartFstState(fstBasename);
+			await fstProjectState.restartFstState(fstBasename);
+		}
+
+		// For PAL C/H files, restart all associated F* states
+		if (filePath.endsWith('.c') || filePath.endsWith('.h')) {
+			const cProjectState = await this.getOrCreatePalProjectState(filePath, {});
+			if (cProjectState) {
+				const fstFiles = cProjectState.getFstFilesForCFile(uri);
+				for (const fstFile of fstFiles) {
+					await cProjectState.restartFstState(fstFile);
+				}
+			}
 		}
 
 		this.documentStates.get(uri)?.dispose();
 		this.documentStates.delete(uri);
 		await this.refreshDocumentState(uri);
-		// And ask the lax fstar process to verify it
 		this.getDocumentState(uri)?.verifyAll({flycheckOnly: true});
 	}
 
