@@ -14,7 +14,7 @@ import {
 	Range,
 	Position
 } from 'vscode-languageclient/node';
-import { StatusNotificationParams, getTranslatedFstRequest, killAllNotification, killAndRestartSolverNotification, restartNotification, statusNotification, verifyToPositionNotification } from './fstarLspExtensions';
+import { StatusNotificationParams, getTranslatedFstRequest, killAllNotification, killAndRestartSolverNotification, restartNotification, statusNotification, verifyAllNotification, verifyToPositionNotification } from './fstarLspExtensions';
 import { CheckedFileEditorProvider, KrmlFileEditorProvider } from './binaryeditors';
 
 let client: LanguageClient;
@@ -175,6 +175,11 @@ export async function activate(context: ExtensionContext) {
 			uri: textEditor.document.uri.toString(),
 			lax: false,
 			position: textEditor.selection.active,
+		})));
+
+	context.subscriptions.push(vscode.commands.registerTextEditorCommand('fstar-vscode-assistant/verify-all', textEditor =>
+		void client.sendNotification(verifyAllNotification, {
+			uri: textEditor.document.uri.toString(),
 		})));
 
 	context.subscriptions.push(vscode.commands.registerTextEditorCommand('fstar-vscode-assistant/restart', textEditor =>

@@ -45,6 +45,12 @@ export interface VerifyToPositionParams {
 export const verifyToPositionNotification =
 	new ProtocolNotificationType<VerifyToPositionParams, RegistrationParams>('$/fstar/verifyToPosition');
 
+export interface VerifyAllParams {
+	uri: string;
+}
+export const verifyAllNotification =
+	new ProtocolNotificationType<VerifyAllParams, RegistrationParams>('$/fstar/verifyAll');
+
 export interface GetTranslatedFstParams {
 	uri: string;
 	position: Position;

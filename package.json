@@ -112,6 +112,11 @@
 				"category": "F*"
 			},
 			{
+				"command": "fstar-vscode-assistant/verify-all",
+				"title": "Verify all",
+				"category": "F*"
+			},
+			{
 				"command": "fstar-vscode-assistant/restart",
 				"title": "Restart",
 				"category": "F*"
