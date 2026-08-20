@@ -146,26 +146,31 @@
 			{
 				"command": "fstar-vscode-assistant/verify-to-position",
 				"key": "ctrl+.",
+				"mac": "cmd+.",
 				"when": "editorTextFocus && editorLangId == fstar"
 			},
 			{
 				"command": "fstar-vscode-assistant/restart",
 				"key": "ctrl+; ctrl+.",
+				"mac": "cmd+; cmd+.",
 				"when": "editorTextFocus && editorLangId == fstar"
 			},
 			{
 				"command": "fstar-vscode-assistant/lax-to-position",
 				"key": "ctrl+shift+.",
+				"mac": "cmd+shift+.",
 				"when": "editorTextFocus && editorLangId == fstar"
 			},
 			{
 				"command": "fstar-vscode-assistant/kill-and-restart-solver",
 				"key": "ctrl+; ctrl+c",
+				"mac": "cmd+; cmd+c",
 				"when": "editorTextFocus && editorLangId == fstar"
 			},
 			{
 				"command": "fstar-vscode-assistant/kill-all",
 				"key": "ctrl+; ctrl+shift+c",
+				"mac": "cmd+; cmd+shift+c",
 				"when": "editorTextFocus && editorLangId == fstar"
 			}
 		],

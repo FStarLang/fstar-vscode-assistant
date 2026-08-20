@@ -82,21 +82,21 @@ The screenshot shows two documents in various states of checking:
   and as "squigglies". Symbols are resolved and hover and jump-to-definition
   tools should work.
 
-* F*: Check to position: The key-binding `Ctrl+.` advances the checker up to the
+* F*: Check to position: The key-binding `Ctrl+.` (`Cmd+.` on macOS) advances the checker up to the
   F* definition that encloses the current cursor position, fully checking.
 
-* F*: Light check to position: The key-binding `Ctrl+Shift+.` advances the checker by
+* F*: Light check to position: The key-binding `Ctrl+Shift+.` (`Cmd+Shift+.` on macOS) advances the checker by
   light-checking the document up to the F* definition enclosing the current cursor position.
   This is useful if you want to quickly advance the checker past a chunk of document which
   might otherwise take a long time to check.
 
-* F*: Restart: The key-binding `Ctrl+; Ctrl+.` restarts the F* session for the current document,
+* F*: Restart: The key-binding `Ctrl+; Ctrl+.` (`Cmd+; Cmd+.` on macOS) restarts the F* session for the current document,
   rewindind the checker to the top of the document and rescanning it to load any dependences
   that may have changed, and fly-checking it to load symbols.
 
 * Check file on save: When the file is saved, or when doing `Ctrl+s`, the
   checker is advanced in full checking mode to the end of the document.
-  This is equivalent to doing `Ctrl+.` on the last line of the document.
+  This is equivalent to doing `Ctrl+.` (`Cmd+.` on macOS) on the last line of the document.
 
 Note, although checking the document proceeds in a linear, top-down fashion, at no point is any
 fragment of the document locked. You can keep editing a document while F* is checking some prefix 
@@ -180,15 +180,15 @@ Sometimes, a proof can take a long time for Z3 to check. If you want to abandon
 the proof search you can kill the underlying Z3 process and ask F* to restart it.
 The following command does that for you:
 
-* fstar-vscode-assistant/kill-and-restart-solver (Ctrl+; Ctrl+c): Terminates the Z3 proof
+* fstar-vscode-assistant/kill-and-restart-solver (Ctrl+; Ctrl+c, Cmd+; Cmd+c on macOS): Terminates the Z3 proof
   search for the current function but maintains the proved status of the file up to that point.
 
 Also, if you're working on F* itself, sometimes it is useful to kill all the F* processes
 associated with an editor session, so you can rebuild fstar.exe. 
 
-* fstar-vscode-assistant/kill-all (Ctrl+; Ctrl+Shift+c): Will kill and F* processes (and
+* fstar-vscode-assistant/kill-all (Ctrl+; Ctrl+Shift+c, Cmd+; Cmd+Shift+c on macOS): Will kill and F* processes (and
   their sub-processes) for all documents. If you want to resume checking a document, you need to
-  restart F* for that document by using the Restart command (Ctrl+; Ctrl+.)
+  restart F* for that document by using the Restart command (Ctrl+; Ctrl+., Cmd+; Cmd+. on macOS)
 
 ### Workspace folders
 
